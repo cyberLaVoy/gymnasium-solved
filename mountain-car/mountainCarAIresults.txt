@@ -1,0 +1,35 @@
+    
+Reward engineering setup:
+# the starting max position over all epochs
+maxPosition = -.4
+
+if done and position >= env.goal_position: 
+    reward = 10000 # an arbitrary huge reward for reaching the end goal
+# this allows for milestone rewards along the hill to climb
+if position > maxPosition:
+    reward += 25
+    maxPosition = position
+# encouragement to gain momentum by climbing either side
+if abs(position+.5) > 0:
+    reward += 5
+# rewards for pushing in the same direction as the cart is moving
+if velocity < 0 and action == moveLeft:
+    reward += 10
+if velocity > 0 and action == moveRight:
+    reward += 10
+
+
+Final itteration of running the Q-learning algorithm:
+Reward Sum on all epochs 11950.4688
+Final Values Q-Table
+[[0. 0. 0.]
+ [0. 0. 0.]
+ [0. 0. 0.]
+ ...
+ [0. 0. 0.]
+ [0. 0. 0.]
+ [0. 0. 0.]]
+Q-Table shape (1566, 3)
+
+Final average reward over 5000 testing itterations: -417.668
+This means the agent took an average of ~418 actions to reach the goal on each itteration.

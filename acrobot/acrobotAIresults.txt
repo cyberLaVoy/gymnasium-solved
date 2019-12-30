@@ -1,0 +1,53 @@
+
+Training/testing results on 9 different nueral networks:
+
+n training epochs: 150 , n testing epochs: 500, activation: sigmoid
+n layers: 1 , Nodes per layer: 10 , Average reward per epoch: -156.03
+n layers: 1 , Nodes per layer: 20 , Average reward per epoch: -153.408
+n layers: 1 , Nodes per layer: 40 , Average reward per epoch: -86.712
+n layers: 2 , Nodes per layer: 10 , Average reward per epoch: -161.224
+n layers: 2 , Nodes per layer: 20 , Average reward per epoch: -216.098
+n layers: 2 , Nodes per layer: 40 , Average reward per epoch: -500.0
+n layers: 3 , Nodes per layer: 10 , Average reward per epoch: -84.382
+n layers: 3 , Nodes per layer: 20 , Average reward per epoch: -500.0
+n layers: 3 , Nodes per layer: 40 , Average reward per epoch: -500.0
+
+The -500 for average reward per epoch means that the agent was never able to complete the task.
+
+There was two best scores.
+1. 1 layer with 40 nodes (6 inputs x 40 nodes + 40 nodes x 3 outputs = 360 weights to consider)
+2. 3 layers with 10 nodes each (6 inputs x 10 nodes + 2 x (10 nodes x 10 nodes) + 10 nodes x 3 outputs = 290 weights to consider)
+
+So given the amount of weights to consider, the smallest nueral network that I would use for this problem would be option 2.
+
+
+The reward engineering for this problem is interesting to note. The code and notes are below:
+
+tipHeight = -np.cos(env.state[0]) - np.cos(env.state[1] + env.state[0]) 
+# initial reward as the height of the tip of the second link (range of: (-2, 1), where 1 is the goal)
+myReward = tipHeight - .5
+if r == 0: # if the goal has been reached, give a significant reward
+    myReward += 25
+theta1Cos = s1[0]
+if theta1Cos <= 0 and tipHeight > 0: # if the first link is parallel to the goal line and the tip of the second link is above the second link
+    # give a decent reward, since this state is required for reaching the goal
+    myReward += 5
+thetaDot2 = s1[-1]
+# provide a reward to get the second link moving as fast as possible to reach the goal
+myReward += abs(thetaDot2)
+
+
+Same training/testing as before, but with a different activation for nodes:
+
+n training epochs: 150 , n testing epochs: 500, activation: linear
+n layers: 1 , Nodes per layer: 10 , Average reward per epoch: -86.46
+n layers: 1 , Nodes per layer: 20 , Average reward per epoch: -167.006
+n layers: 1 , Nodes per layer: 40 , Average reward per epoch: -90.842
+n layers: 2 , Nodes per layer: 10 , Average reward per epoch: -172.788
+n layers: 2 , Nodes per layer: 20 , Average reward per epoch: -261.452
+n layers: 2 , Nodes per layer: 40 , Average reward per epoch: -110.352
+n layers: 3 , Nodes per layer: 10 , Average reward per epoch: -175.668
+n layers: 3 , Nodes per layer: 20 , Average reward per epoch: -88.594
+n layers: 3 , Nodes per layer: 40 , Average reward per epoch: -80.42
+
+In this case, the smallest neural network I would use would be 1 layer with 10 nodes.

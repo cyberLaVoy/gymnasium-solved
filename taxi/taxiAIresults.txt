@@ -1,0 +1,22 @@
+Q-learning algorithm was run with two itterations. 
+
+1st iteration Q-learning algorithm parameters:
+completionTries=300, alpha=.65, gamma=.9, epochs=500000, randomInfluence=3
+
+2nd iteration Q-learning algorithm parameters:
+completionTries=100, alpha=.25, gamma=.9, epochs=10000, randomInfluence=.5
+
+2nd iteration results of building Q-Table:
+Reward Sum on all epochs 8.2744
+Final Values Q-Table
+[[ 0.          0.          0.          0.          0.          0.        ]
+ [-3.42305135 -3.31856627 -3.86562667 -3.48113591  4.348907   -6.5       ]
+ [-3.89057864 -3.72794701 -3.86091908 -3.73944589  7.7147     -6.5       ]
+ ...
+ [-2.35730649 -2.31308882 -2.35730649 -2.35730649 -6.5        -6.5       ]
+ [-3.69806808 -3.97902444 -3.7030937  -3.90978675 -6.5        -6.5       ]
+ [-0.8775      0.          0.         -0.8775     -6.5         0.        ]]
+Q-Table shape (500, 6)
+
+Final Q-Table model testing with 500000 iterations:
+Average reward 8.2437
