@@ -104,8 +104,8 @@ def main():
 
     modelName = "cartPole-v0-nn"
     trainAndSave = False
-    loadAndTest = True
-    loadAndObserve = False
+    loadAndTest = False
+    loadAndObserve = True
 
     if trainAndSave:
         model = createNeuralNetwork()
