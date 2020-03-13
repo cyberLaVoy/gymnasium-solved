@@ -7,7 +7,6 @@ import time
 
 def saveModel(model, fileName):
     model.save(fileName + ".h5")
-
 def loadModel(fileName):
     return load_model(fileName + ".h5")
     
