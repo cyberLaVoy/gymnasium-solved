@@ -10,6 +10,9 @@ from random import randint, seed
 
 MEM_ITEMS_COUNT = 1000000
 REPLAY_START = 50000
+BATCH_SIZE = 32
+GAMMA = .99
+RANDOMNESS_CONVERGENCE_ITER = 1000
 
 class RingBuf:
     def __init__(self, size=MEM_ITEMS_COUNT):
@@ -39,12 +42,11 @@ class RingBuf:
             yield self[i]
 
 class Memory:
-    def __init__(self, capacity=REPLAY_START):
+    def __init__(self):
         self.data = {"start_states": RingBuf(), "actions" : RingBuf(), "rewards": RingBuf(), "next_states": RingBuf(), "is_terminal": RingBuf()}
-        self.capactiy= capacity
     def sample(self, size):
         minimum = 0
-        maximum = len(self.data["start_states"])
+        maximum = len(self.data["start_states"])-1
         indices = []
         for _ in range(size):
             indices.append(randint(minimum, maximum))
@@ -60,8 +62,6 @@ class Memory:
         self.data["rewards"].append(reward)
         self.data["next_states"].append(nextState)
         self.data["is_terminal"].append(isTerminal)
-    def atCapacity(self): 
-        return len(self.data["start_states"]) >= self.capactiy
 
 
 # actions: 0 - do nothing; 1 - start game; 2 - move right; 3 - move left 
@@ -79,9 +79,8 @@ def createModel():
     conv1 = Conv2D(16, 8, strides=4, activation="relu")(norm)
     conv2 = Conv2D(32, 4, strides=2, activation="relu")(conv1)
     flat = Flatten()(conv2)
-    h0 = Dense(128, activation="relu")(flat)
-    h1 = Dense(128, activation="relu")(h0)
-    out = Dense(4, activation="softmax")(h1)
+    h0 = Dense(256, activation="relu")(flat)
+    out = Dense(4, activation="linear")(h0)
 
     filtered = keras.layers.multiply([out, actionsIn])
     model = Model(inputs=[framesIn, actionsIn], outputs=filtered)
@@ -89,19 +88,23 @@ def createModel():
     model.compile(optimizer, loss="mse")
     return model
 
-def fitBatch(model, startStates, actions, rewards, nextStates, isTerminal):
-    gamma = .99
-
+def fitBatch(model, startStates, actions, rewards, nextStates, isTerminal, gamma=GAMMA):
     startStates = np.array(startStates)
     actions = np.array(actions)
     rewards = np.array(rewards)
     nextStates = np.array(nextStates)
     isTerminal = np.array(isTerminal)
 
+    # predict q-values for any action, on states after action
     nextQvalues = model.predict([nextStates, np.ones(actions.shape)])
+    # zero out predicted q-values for all terminal states
     nextQvalues[isTerminal] = 0
-    qValues = rewards + gamma*np.max(nextQvalues, axis=1)
-    model.fit([startStates, actions], actions*qValues[:, None], batch_size=len(startStates), verbose=0)
+
+    # set expected q-values to be the actual rewards plus gamma percent of best predicted q-values
+    expectedQvalues = rewards + gamma*np.max(nextQvalues, axis=1)
+    expectedQvalues = actions*expectedQvalues[:, None]
+
+    model.fit([startStates, actions], expectedQvalues, batch_size=len(startStates), verbose=0)
 
 def convertFrame(f):
     f = np.mean(f, axis=2).astype(np.uint8)
@@ -128,18 +131,23 @@ def gatherFrames(env, a, reset=False):
     #plt.show()
     return np.array([f0]), np.sign(r0), done, info
 
-def getEpsilon(i):
-    e0 = 1 # starting probability of performing random action
-    return max(e0-(.9*i/250), .1)
+def getEpsilon(i, convergence=RANDOMNESS_CONVERGENCE_ITER):
+    e0 = 1
+    convergeValue = .1
+    if i < convergence:
+        e = e0-(.9*i/convergence)
+    else:
+        e = convergeValue
+    return e
 
-def learn(model, memory):
-    batch = memory.sample(32)
+def learn(model, memory, batchSize=BATCH_SIZE):
+    batch = memory.sample(batchSize)
     startStates, actions, rewards, nextStates, isTerminal = batch
     fitBatch(model, startStates, actions, rewards, nextStates, isTerminal)
 
-def buildReplay(env, memory):
+def buildReplay(env, memory, amount=REPLAY_START):
     iteration = 0
-    while not memory.atCapacity():
+    while iteration < amount:
         currState = gatherFrames(env, None, True)
         while True:
             a = env.action_space.sample()
@@ -150,7 +158,7 @@ def buildReplay(env, memory):
             iteration += 1
             if done:
                 break
-        print(iteration)
+        print("iteration:", iteration, '/', amount)
 
 
 def train(env, model, memory, epochs, render=True):
@@ -177,7 +185,6 @@ def train(env, model, memory, epochs, render=True):
             if done:
                 break
             currState = nextState
-        if i % 4 == 0:
             learn(model, memory)
         print("Epoch reward:", epochReward, "Randomness:", epsilon)
     env.close()
@@ -186,7 +193,8 @@ def train(env, model, memory, epochs, render=True):
 def observeAgent(model, env):
     actionMask = np.ones((1,4))
     while True:
-        s = gatherFrames(env, None, True)
+        env.reset()
+        s,_,_,_ = gatherFrames(env, 1)
         while True:
             env.render()
             a = np.argmax( model.predict([s, actionMask]) )
@@ -197,8 +205,8 @@ def observeAgent(model, env):
     env.close()
 
 def main():
-    env = gym.make("BreakoutNoFrameskip-v4")
-    modelName = "breakoutnoframeskip-v4-nn"
+    env = gym.make("BreakoutDeterministic-v4")
+    modelName = "breakoutdeterministic-v4-nn"
     memory = Memory()
 
     trainAndSave = True
@@ -212,7 +220,7 @@ def main():
         print("Building replay...")
         buildReplay(env, memory)
         print("Training model...")
-        train(env, model, memory, 500, True)
+        train(env, model, memory, 1500, True)
         saveModel(model, modelName)
 
     if loadAndObserve:
