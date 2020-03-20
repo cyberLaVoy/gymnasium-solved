@@ -79,8 +79,9 @@ def createModel():
     conv1 = Conv2D(16, 8, strides=4, activation="relu")(norm)
     conv2 = Conv2D(32, 4, strides=2, activation="relu")(conv1)
     flat = Flatten()(conv2)
-    h0 = Dense(256, activation="relu")(flat)
-    out = Dense(4, activation="linear")(h0)
+    h0 = Dense(128, activation="relu")(flat)
+    h1 = Dense(128, activation="relu")(h0)
+    out = Dense(4, activation="linear")(h1)
 
     filtered = keras.layers.multiply([out, actionsIn])
     model = Model(inputs=[framesIn, actionsIn], outputs=filtered)
@@ -185,7 +186,7 @@ def train(env, model, memory, epochs, render=True):
             if done:
                 break
             currState = nextState
-            learn(model, memory)
+        learn(model, memory)
         print("Epoch reward:", epochReward, "Randomness:", epsilon)
     env.close()
     return model
