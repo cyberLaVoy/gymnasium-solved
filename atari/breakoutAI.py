@@ -1,87 +1,66 @@
-import gym, time
+from memory import ReplayMemory
+import gym, time, cv2, os
 import numpy as np
-from PIL import Image
 from matplotlib import pyplot as plt
-from sklearn.preprocessing import normalize
-from tensorflow.keras.models import Sequential, load_model, Model
-from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Flatten, Input, Lambda
+from tensorflow.keras.models import load_model, Model
+from tensorflow.keras.layers import Dense, Conv2D, Flatten, Input, Lambda
+from tensorflow.keras.initializers import VarianceScaling
 import tensorflow.keras as keras
-from random import randint, seed
-
-MEM_ITEMS_COUNT = 1000000
-REPLAY_START = 50000
-BATCH_SIZE = 32
-GAMMA = .99
-RANDOMNESS_CONVERGENCE_ITER = 1000
-
-class RingBuf:
-    def __init__(self, size=MEM_ITEMS_COUNT):
-        # Pro-tip: when implementing a ring buffer, always allocate one extra element,
-        # this way, self.start == self.end always means the buffer is EMPTY, whereas
-        # if you allocate exactly the right number of elements, it could also mean
-        # the buffer is full. This greatly simplifies the rest of the code.
-        self.data = [None] * (size + 1)
-        self.start = 0
-        self.end = 0
-    def append(self, element):
-        self.data[self.end] = element
-        self.end = (self.end + 1) % len(self.data)
-        # end == start and yet we just added one element. This means the buffer has one
-        # too many element. Remove the first element by incrementing start.
-        if self.end == self.start:
-            self.start = (self.start + 1) % len(self.data)
-    def __getitem__(self, idx):
-        return self.data[(self.start + idx) % len(self.data)]
-    def __len__(self):
-        if self.end < self.start:
-            return self.end + len(self.data) - self.start
-        else:
-            return self.end - self.start
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self[i]
-
-class Memory:
-    def __init__(self):
-        self.data = {"start_states": RingBuf(), "actions" : RingBuf(), "rewards": RingBuf(), "next_states": RingBuf(), "is_terminal": RingBuf()}
-    def sample(self, size):
-        minimum = 0
-        maximum = len(self.data["start_states"])-1
-        indices = []
-        for _ in range(size):
-            indices.append(randint(minimum, maximum))
-        collection = ( [self.data["start_states"][i] for i in indices], 
-                       [self.data["actions"][i] for i in indices],
-                       [self.data["rewards"][i] for i in indices],
-                       [self.data["next_states"][i] for i in indices],
-                       [self.data["is_terminal"][i] for i in indices] )
-        return collection
-    def add(self, startState, action, reward, nextState, isTerminal):
-        self.data["start_states"].append(startState)
-        self.data["actions"].append(action)
-        self.data["rewards"].append(reward)
-        self.data["next_states"].append(nextState)
-        self.data["is_terminal"].append(isTerminal)
-
 
 # actions: 0 - do nothing; 1 - start game; 2 - move right; 3 - move left 
+
+MEM_ITEMS_COUNT = 1000000
+REPLAY_START = 5000
+BATCH_SIZE = 32
+GAMMA = .99
+RANDOMNESS_CONVERGENCE_ITER = 50000
+TRAINING_ITER = 2000
+TARGET_UPDATE_ITER = 5000
+MAX_DO_NOTHING = 30
+
+class TargetNetwork():
+    def __init__(self, model, name="target_network"):
+        self.name = name + ".h5"
+        if os.path.exists(self.name):
+            self.model = load_model(self.name)
+        else:
+            self.model = model
+    def __del__(self):
+        print("Saving target netwok...")
+        self.model.save(self.name)
+    def update(self, newModel):
+        newModel.save(self.name)
+        self.model = load_model(self.name)
+    def predict(self, state):
+        return self.model.predict(state)
+
 
 def saveModel(model, fileName):
     model.save(fileName + ".h5")
 def loadModel(fileName):
     return load_model(fileName + ".h5")
+
+def getStartState(env):
+    f0 = convertFrame( env.reset() )
+    startState = f0
+    for _ in range(3):
+        startState = np.add(startState, f0)
+        startState = np.floor_divide(startState, 2)
+    return np.array([startState])
   
 def createModel():
-    framesIn = Input((105,320,1), name="frames")
+    initializer = VarianceScaling(scale=2)
+    framesIn = Input((80,80,1), name="frames")
     actionsIn = Input((4,), name="mask")
 
     norm = Lambda(lambda x: x / 255.0)(framesIn)
-    conv1 = Conv2D(16, 8, strides=4, activation="relu")(norm)
-    conv2 = Conv2D(32, 4, strides=2, activation="relu")(conv1)
+    conv1 = Conv2D(16, 8, strides=4, activation="relu", kernel_initializer=initializer)(norm)
+    conv2 = Conv2D(8, 4, strides=2, activation="relu", kernel_initializer=initializer)(conv1)
     flat = Flatten()(conv2)
-    h0 = Dense(128, activation="relu")(flat)
-    h1 = Dense(128, activation="relu")(h0)
-    out = Dense(4, activation="linear")(h1)
+    h0 = Dense(32, activation="relu", kernel_initializer=initializer)(flat)
+    h1 = Dense(32, activation="relu", kernel_initializer=initializer)(h0)
+    h2 = Dense(32, activation="relu", kernel_initializer=initializer)(h1)
+    out = Dense(4, activation="linear")(h2)
 
     filtered = keras.layers.multiply([out, actionsIn])
     model = Model(inputs=[framesIn, actionsIn], outputs=filtered)
@@ -89,105 +68,124 @@ def createModel():
     model.compile(optimizer, loss="mse")
     return model
 
-def fitBatch(model, startStates, actions, rewards, nextStates, isTerminal, gamma=GAMMA):
-    startStates = np.array(startStates)
-    actions = np.array(actions)
-    rewards = np.array(rewards)
-    nextStates = np.array(nextStates)
-    isTerminal = np.array(isTerminal)
-
+def fitBatch(model, targetModel, startStates, actions, rewards, nextStates, isTerminal, gamma=GAMMA):
     # predict q-values for any action, on states after action
-    nextQvalues = model.predict([nextStates, np.ones(actions.shape)])
+    nextQvalues = targetModel.predict([nextStates, np.ones(actions.shape)])
     # zero out predicted q-values for all terminal states
     nextQvalues[isTerminal] = 0
-
     # set expected q-values to be the actual rewards plus gamma percent of best predicted q-values
     expectedQvalues = rewards + gamma*np.max(nextQvalues, axis=1)
     expectedQvalues = actions*expectedQvalues[:, None]
-
     model.fit([startStates, actions], expectedQvalues, batch_size=len(startStates), verbose=0)
+
+def displayFrames(f):
+    f = np.reshape(f, (80,80))
+    f = f / 255
+    plt.imshow(f, cmap="gray")
+    plt.show()
 
 def convertFrame(f):
     f = np.mean(f, axis=2).astype(np.uint8)
-    f = f[::2, ::2]
-    f = np.reshape(f, (105,80,1))
-    #plt.imshow(f, cmap="gray")
-    #plt.show()
+    f = f[35:195:, ::]
+    f = cv2.resize(f, dsize=(80, 80), interpolation=cv2.INTER_NEAREST)
+    f = np.reshape(f, (80,80,1))
     return f
 
-def gatherFrames(env, a, reset=False):
-    if reset:
-        f0 = convertFrame(env.reset())
-        f1 = f0.copy()
-        for _ in range(3):
-            f0 = np.concatenate((f0, f1), axis=1)
-        return np.array([f0])
+def gatherFrames(env, a):
     f0, r0, done, info = env.step(a)
     f0 = convertFrame(f0)
-    for _ in range(3):
-        f1, r1, done, info = env.step(a)
+    action = 0
+    for i in range(7):
+        f1, r1, done, info = env.step(action)
         r0 += r1
-        f0 = np.concatenate((f0, convertFrame(f1)), axis=1)
-    #plt.imshow(f0, cmap="gray")
-    #plt.show()
+        if i % 2 == 0:
+            f0 = np.add(f0, convertFrame(f1))
+            f0 = np.floor_divide(f0, 2)
+        else:
+            action = a
     return np.array([f0]), np.sign(r0), done, info
 
 def getEpsilon(i, convergence=RANDOMNESS_CONVERGENCE_ITER):
-    e0 = 1
-    convergeValue = .1
-    if i < convergence:
-        e = e0-(.9*i/convergence)
+    if i >= convergence:
+        return .1
     else:
-        e = convergeValue
-    return e
+        return 1 - .9*i/convergence
 
-def learn(model, memory, batchSize=BATCH_SIZE):
+def getAction(env, model, currState, actionCount):
+    actionMask = np.ones((1,4))
+    epsilon = getEpsilon(actionCount)
+    if np.random.random() <= epsilon:
+        a = env.action_space.sample()
+    else:
+        a = np.argmax( model.predict( [currState, actionMask] ) )
+    return a
+
+def unpackSample(sample):
+    startStates = np.array([ item[0] for item in sample])
+    actions = np.array([ item[1] for item in sample]).astype(np.uint8)
+    rewards = np.array([ item[2] for item in sample])
+    nextStates = np.array([ item[3] for item in sample])
+    isTerminal = np.array([ item[4] for item in sample])
+    onehotActions = np.zeros((actions.size, 4)).astype(np.uint8)
+    onehotActions[np.arange(actions.size), actions] = 1
+    return startStates, onehotActions, rewards, nextStates, isTerminal
+
+def learn(model, targetModel, memory, actionCount, batchSize=BATCH_SIZE):
     batch = memory.sample(batchSize)
-    startStates, actions, rewards, nextStates, isTerminal = batch
-    fitBatch(model, startStates, actions, rewards, nextStates, isTerminal)
+    startStates, actions, rewards, nextStates, isTerminal = unpackSample(batch)
+    fitBatch(model, targetModel, startStates, actions, rewards, nextStates, isTerminal)
 
 def buildReplay(env, memory, amount=REPLAY_START):
     iteration = 0
     while iteration < amount:
-        currState = gatherFrames(env, None, True)
-        while True:
+        currState = getStartState(env)
+        done = False
+        while not done:
             a = env.action_space.sample()
             nextState, r, done, _ = gatherFrames(env, a)
-            action = [0]*4
-            action[a] = 1
-            memory.add(currState[0], action, r, nextState[0], done)
-            iteration += 1
             if done:
-                break
-        print("iteration:", iteration, '/', amount)
+                r = 0
+            memory.append( (currState[0], a, r, nextState[0], done) )
+            iteration += 1
+        print("Iteration:", iteration, '/', amount)
 
 
-def train(env, model, memory, epochs, render=True):
-    actionMask = np.ones((1,4))
-    for i in range(1, epochs+1):
-        print("Epoch", str(i)+'/'+str(epochs))
-        epochReward = 0
-        currState = gatherFrames(env, None, True)
-        epsilon = getEpsilon(i)
-        while True:
+def train(env, model, targetModel, memory, targetUpdate=TARGET_UPDATE_ITER, episodes=TRAINING_ITER, maxDoNothing=MAX_DO_NOTHING, render=True):
+    actionCount = 0
+    for i in range(1, episodes+1):
+        print("Episode", str(i)+'/'+str(episodes))
+        episodeReward = 0
+        currState = getStartState(env)
+        done = False
+        doNothingCount = 0
+        while not done:
+
             if render:
                 env.render()
 
-            if np.random.random() <= epsilon:
-                a = env.action_space.sample()
-            else:
-                a = np.argmax( model.predict( [currState, actionMask] ) )
+            a = getAction(env, model, currState, actionCount)
+            if doNothingCount is not None and a == 0:
+                doNothingCount += 1
+                if doNothingCount >= maxDoNothing:
+                    a = 1
+                    doNothingCount = None
+            actionCount += 1
+
             nextState, r, done, _ = gatherFrames(env, a)
 
-            action = [0]*4
-            action[a] = 1
-            memory.add(currState[0], action, r, nextState[0], done)
-            epochReward += r
             if done:
-                break
+                r = -1
+
             currState = nextState
-        learn(model, memory)
-        print("Epoch reward:", epochReward, "Randomness:", epsilon)
+
+            episodeReward += r
+            memory.append( (currState[0], a, r, nextState[0], done) )
+            if actionCount % targetUpdate == 0:
+                print("Updating target network...")
+                targetModel.update(model)
+            if actionCount % 4 == 0:
+                learn(model, targetModel, memory, actionCount)
+        print("Episode reward:", episodeReward, "Epsilon:", getEpsilon(actionCount))
     env.close()
     return model
 
@@ -206,27 +204,30 @@ def observeAgent(model, env):
     env.close()
 
 def main():
-    env = gym.make("BreakoutDeterministic-v4")
+    env = gym.make("BreakoutNoFrameskip-v4")
     modelName = "breakoutdeterministic-v4-nn"
-    memory = Memory()
+    memory = ReplayMemory(MEM_ITEMS_COUNT)
 
+    saveReplay = False
     trainAndSave = True
     loadAndObserve = False
 
-    seed(69)
+    if saveReplay:
+        buildReplay(env, memory)
+        memory.save()
 
     if trainAndSave:
         model = createModel()
+        targetModel = TargetNetwork(model)
+        memory.load()
         print(model.summary())
-        print("Building replay...")
-        buildReplay(env, memory)
         print("Training model...")
-        train(env, model, memory, 1500, True)
+        train(env, model, targetModel, memory, render=True)
         saveModel(model, modelName)
 
     if loadAndObserve:
         model = loadModel(modelName)
         observeAgent(model, env)
 
-
-main()
+if __name__ == "__main__":
+    main()
