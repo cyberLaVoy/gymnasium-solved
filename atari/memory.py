@@ -35,7 +35,7 @@ class RingBuffer:
             yield self[i]
 
 class ReplayMemory:
-    def __init__(self, startState, actionSpace, size=2, seed=69):
+    def __init__(self, startState, actionSpace, size=1000000, seed=69):
         """
         Frames to other buffer alignment example:
         [f1, f2, f3, f4, f5, f6]

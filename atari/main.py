@@ -52,7 +52,7 @@ def train(game, agent, memory, episodes=20000, render=True):
 def testAgent(game, agent, episodes):
     epochScore = 0
     actionCounts = [0]*game.getActionSpace()
-    memory = ReplayMemory(game.reset(), game.getActionSpace())
+    memory = ReplayMemory(game.reset(), game.getActionSpace(), size=0)
     for _ in range(episodes):
         episodeScore = 0
         game.reset()
@@ -90,7 +90,7 @@ def main():
 
     if trainAndSave:
         agent = Agent(agentName, game.getActionSpace(), modelLoad=load, targetLoad=load)
-        memory = ReplayMemory(game.reset(), game.getActionSpace(), size=1000000)
+        memory = ReplayMemory(game.reset(), game.getActionSpace())
         if load is None:
             buildMemory(game, memory, 1024)
         train(game, agent, memory, render=True)
