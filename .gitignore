@@ -1,3 +1,5 @@
 *.h5
 *.pk
+*.avi
+*episode-saves*
 *__pycache__*
