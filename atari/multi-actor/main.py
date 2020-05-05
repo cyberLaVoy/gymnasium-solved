@@ -57,9 +57,9 @@ def train(game, agent, memory, episodes=10000, render=False, epochSteps=50):
         epochEsp += 1
         efficiency = epsReward / timeTaken
         print( "Episode " + str(eps)+'/'+str(episodes), "Action count:", act, "Reward:", epsReward, "Time taken(s):", round(timeTaken, 2), "AVG Reward:", round(avgReward, 2), "Efficiency:", round(efficiency, 2) )
-        if epsReward > bestScore:
+        if game.getScore() > bestScore:
             game.saveEpisode()
-            bestScore = epsReward
+            bestScore = game.getScore()
         if eps % epochSteps == 0:
             epochReward = 0
             epochEsp = 1
@@ -110,7 +110,7 @@ def main():
     #load = "atari_agent_breakout_best.h5"
     #load = "atari_agent_pong_best.h5"
     #load = "atari_agent_ms_pacman_best.h5"
-    #load = "atari_agent_space_invaders.h5"
+    load = "atari_agent_space_invaders.h5"
 
     trainAndSave = True
     testAndObserve = False
@@ -130,4 +130,8 @@ def main():
 
 
 if __name__ == "__main__":
+    if tf.test.gpu_device_name():
+        print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
+    else:
+        print("Please install GPU version of TF")
     main()

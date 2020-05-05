@@ -78,7 +78,7 @@ class Agent:
         model = Model(inputs=[framesIn, actionsIn], outputs=filtered)
 
         #opt = Adam( learning_rate=.00025 )
-        opt = Adam( learning_rate=.0000625 )
+        opt = Adam( learning_rate=.0001 )
         model.compile(opt, loss="huber_loss")
         return model
 

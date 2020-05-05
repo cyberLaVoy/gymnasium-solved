@@ -8,20 +8,24 @@ class Atari:
         self.lives = None
         self.framesAfterDeath = None
         self.episode = None
+        self.score = None
         random.seed( seed )
 
     def reset(self):
         frame = self.env.reset() 
         self.lives = self.env.ale.lives()
         self.framesAfterDeath = 0
+        self.score = 0
         self.episode = [frame]
         return self._processFrame( frame )
 
     def step(self, action):
-        if self.lives is None or self.framesAfterDeath is None or self.episode is None:
+        if None in [self.lives, self.framesAfterDeath, self.score, self.episode]:
             raise RuntimeError("step called before reset")
 
         state, reward, done, info = self.env.step(action)
+        self.score += reward
+
         self.episode.append(state)
         state = self._processFrame(state)
 
@@ -69,6 +73,10 @@ class Atari:
             raise RuntimeError("info request before reset")
         return self.framesAfterDeath
 
+    def getScore(self):
+        if self.score is None:
+            raise RuntimeError("info request before reset")
+        return self.score
     def getActionSpace(self):
         return self.env.action_space.n
     def getActionMeanings(self):
