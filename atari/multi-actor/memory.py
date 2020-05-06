@@ -77,7 +77,7 @@ class SumTree:
     def total_priority(self):
         return self.tree[0]
 
-class PriorityIndexer:
+class PriorityReplayMemory:
     e = .001
     alpha = .6
     beta = .4
@@ -87,22 +87,24 @@ class PriorityIndexer:
     def __init__(self, capacity):
         self.tree = SumTree(capacity)
       
-    def newLeaf(self):
-        self.tree.add(self.maxPriority, None) 
+    def newLeaf(self, exp):
+        self.tree.add(self.maxPriority, exp) 
 
     def _annealBeta(self):
         self.beta = min(1.0, self.beta+self.betaAnneal ) 
 
     def sample(self, n):
-        dataIndices = np.zeros(n).astype(np.uint32)
+        if n > self.tree.n_entries:
+            n = self.tree.n_entries
         treeIndices = np.zeros(n).astype(np.uint32)
         priorities = np.zeros(n)
+        data = []
         delta_p = self.tree.total_priority / n
         p = 0
         for i in range(n):
             v = np.random.uniform(p, p+delta_p)
-            ti, di, priority, _ = self.tree.get_leaf(v)
-            dataIndices[i] = di
+            ti, di, priority, exp = self.tree.get_leaf(v)
+            data.append(exp)
             treeIndices[i] = ti
             priorities[i] = priority
             p += delta_p
@@ -112,7 +114,7 @@ class PriorityIndexer:
         isWeights /= isWeights.max()
         self._annealBeta()
 
-        return dataIndices, treeIndices, isWeights
+        return data, treeIndices, isWeights
 
     def batchUpdate(self, treeIdx, errors):
         errors += self.e
@@ -121,80 +123,58 @@ class PriorityIndexer:
         for ti, priority in zip(treeIdx, errors):
             self.tree.update(ti, priority)
 
-class ReplayMemory:
-    def __init__(self, startState, actionSpace, size=1000000, seed=69, prioritized=True):
-        """
-        Frames to info buffer alignment example:
-        [f1, f2, f3, f4, f5, f6]
-                    [i1, i2]
-        *After capacity reached
-        [f2, f3, f4, f5, f6, f7]
-                    [i2, i3]
-        """
-        self.frames = RingBuffer( size + 4 )
-        # info contains (action, reward, is_terminal) tuples
-        self.info = RingBuffer(size)
-        # controls logic for prioritized replay experience
-        self.prioritized = prioritized
-        if self.prioritized:
-            self.priorities = PriorityIndexer(size)
-        # frames buffer must start with 4 non-action frames
-        for _ in range(4):
-            self.frames.append(startState)
-        self.actionSpace = actionSpace
-        random.seed( seed )
 
-    def getState(self, inx=None):
-        # default to grab last state
-        if inx is None:
-            inx = len(self.frames)-4
-        state = [ self.frames[inx+i] for i in range(4) ]
-        return np.dstack( state )
+class LearnerReplayMemory:
+    def __init__(self, actorChans, size=500000):
+        self.priorities = PriorityReplayMemory(size)
+        self.actorChans = actorChans
 
-    def append(self, mem):
-        # append to all memory parts to keep indexing aligned
-        self.frames.append( mem[0] )
-        self.info.append( (mem[1], mem[2], mem[3]) )
-        if self.prioritized:
-            self.priorities.newLeaf()
+    def append(self, exp):
+        self.priorities.newLeaf(exp)
 
-    def _priorityIndices(self, n):
-        return self.priorities.sample(n)
-
-    def _randomValidIndices(self, n):
-        if n > len(self.info):
-           n = len(self.info) 
-        validIndices = range(0, len(self.info)) 
-        return random.sample(validIndices, n)
+    def updatePriorities(self, indices, newPriorities):
+        self.priorities.batchUpdate(indices, newPriorities)
 
     def sample(self, n):
+        self.load()
         A = {"curr_states": [], "next_states": [], 
                      "actions": [], "rewards":[], "is_terminal": []}
-        if self.prioritized:
-            dataIndices, treeIndices, isWeights = self._priorityIndices(n)
-        else:
-            dataIndices, treeIndices, isWeights = self._randomValidIndices(n), None, np.ones(n)
-        for inx in dataIndices:
-            A["curr_states"].append( self.getState(inx) )
-            A["next_states"].append( self.getState(inx+1) )
-            A["actions"].append( self.info[inx][0] )
-            A["rewards"].append( self.info[inx][1] )
-            A["is_terminal"].append( self.info[inx][2] )
+        experiences, treeIndices, isWeights = self.priorities.sample(n)
+        for exp in experiences:
+            A["curr_states"].append( exp[0] )
+            A["next_states"].append( exp[1] )
+            A["actions"].append( exp[2] )
+            A["rewards"].append( exp[3] )
+            A["is_terminal"].append( exp[4] )
         for key in A:
             A[key] = np.array(A[key])
         batch = (A["curr_states"], A["next_states"], A["actions"], A["rewards"], A["is_terminal"])
         return treeIndices, batch, isWeights
 
-    def updatePriorities(self, indices, newPriorities):
-        if self.prioritized:
-            self.priorities.batchUpdate(indices, newPriorities)
-        else:
-            pass
+    def load(self):
+        for chan in self.actorChans:
+            if not chan.empty():
+                print("Loading")
+                experiences = chan.get()
+                for exp in experiences:
+                    self.append(exp)
 
-    def __len__(self):
-        return len(self.info)
 
+class ActorReplayMemory:
+    def __init__(self, learnerChan, size=2**13):
+        self.experiences = []
+        self.size = size
+        self.learnerChan = learnerChan
 
+    def append(self, exp):
+        self.experiences.append(exp)
+        if len(self.experiences) == self.size:
+            self.dump()
+
+    def dump(self):
+        print("Dumping")
+        self.learnerChan.put( self.experiences )
+        self.experiences.clear()
 
 
 

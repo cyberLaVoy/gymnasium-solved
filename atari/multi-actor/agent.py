@@ -1,5 +1,6 @@
 import numpy as np
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 
 import tensorflow as tf
 from tensorflow.keras import backend as K
@@ -69,25 +70,28 @@ class Agent:
         return np.argmax( self.predict(state) ) 
 
 class ActorAgent(Agent):
-    def __init__(self, game, learnerChan, actorID, modelLoad=None):
+    def __init__(self, game, memory, learnerChan, actorID, render, modelLoad=None):
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
         super().__init__(game.getActionSpace(), modelLoad)
         self.game = game
-        self.memory = RingBuffer(5000)
+        self.memory = memory
         self.learnerChan = learnerChan
         self.actorID = actorID
+        self.render = render
 
     def _updateWeights(self):
-        if self.learnerChan.poll():
-            weights = self.learnerChan.recv()
+        if not self.learnerChan.empty():
+            weights = self.learnerChan.get()
             self.model.set_weights( weights )
 
-    def explore(self, episodes):
-        for _ in range(episodes):
-            print("act", self.actorID)
+    def explore(self):
+        while True:
+            #print("act", self.actorID)
             done = False
             s0 = self.game.reset() 
             while not done:
+                if self.render:
+                    self.game.render()
                 # choose action
                 if self.game.getFramesAfterDeath() < 2:
                     a = 1
@@ -103,11 +107,12 @@ class ActorAgent(Agent):
         self.game.close()
 
 class LearnerAgent(Agent):
-    def __init__(self, agentName, actionSpace, actorsChan, modelLoad=None, targetUpdateFreq=2500, actorUpdateFreq=1000, gamma=0.99, sampleSize=32):
+    def __init__(self, memory, agentName, actionSpace, actorsChan, modelLoad=None, targetUpdateFreq=1000, actorUpdateFreq=8, gamma=0.99, sampleSize=32):
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         super().__init__(actionSpace, modelLoad)
         self.name = agentName
         self.modelName = self.name + ".h5"
+        self.memory = memory
 
         self.actorUpdateFreq = actorUpdateFreq
         self.actorsChan = actorsChan
@@ -123,10 +128,10 @@ class LearnerAgent(Agent):
     def __del__(self):
         self.model.save(self.modelName)
     
-    def learn(self, memory, iters):
-        for _ in range(iters):
-            print("learn")
-            indices, batch, isWeights = memory.sample(self.sampleSize) 
+    def learn(self):
+        while True:
+            #print("learn")
+            indices, batch, isWeights = self.memory.sample(self.sampleSize) 
             startStates, nextStates, actions, rewards, isTerminal = batch 
             actions = self._getActionsMask(actions)
 
@@ -151,13 +156,16 @@ class LearnerAgent(Agent):
                 self._updateActors()
 
             tdError = abs( np.max(targetQ, axis=1) - np.max(onlineQvalues, axis=1) )
-            memory.updatePriorities(indices, tdError)
+            self.memory.updatePriorities(indices, tdError)
+
 
     def _updateTarget(self):
+        print("Updating target network...")
         self.targetNet.set_weights(self.model.get_weights()) 
     def _updateActors(self):
+        print("Sending actor weights...")
         for chan in self.actorsChan:
-            chan.send(self.model.get_weights())
+            chan.put(self.model.get_weights())
 
     def _getActionsMask(self, actions):
         mask = np.zeros((actions.size, self.actionSpace)).astype(np.bool)

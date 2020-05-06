@@ -3,19 +3,19 @@ import numpy as np
 from matplotlib import pyplot as plt
 from atari import Atari
 from agent import LearnerAgent, ActorAgent
-from memory import ReplayMemory
+from memory import LearnerReplayMemory, ActorReplayMemory
 # do not import tensorflow here, as it will break the multiprocessing library
 
-def buildMemory(game, memory, amount):
-    while len(memory) < amount:
+def buildMemory(game, memory, episodes):
+    for eps in range(episodes):
         done = False
-        game.reset() 
+        s0 = game.reset() 
         while not done:
             a = np.random.choice( game.getActionSpace() )
-            s, r, done, info = game.step(a)
-            s = np.ones((84,84)) # temporary garbage
-            memory.append( (s, a, r, info["life_lost"]) )
-        print("Memory:", str(len(memory)) + '/' + str(amount))
+            s1, r, done, info = game.step(a)
+            memory.append( (s0, s1, a, r, info["life_lost"]) )
+            s0 = s1
+        print("Episode", str(eps) + '/' + str(episodes) )
 
 def main():
     game = Atari("BreakoutDeterministic-v4")
@@ -39,29 +39,33 @@ def main():
 
     if trainAndSave:
 
-        memory = ReplayMemory(np.ones((84,84)), game.getActionSpace(), prioritized=True)
         processes = []
 
-        actorChans = []
-        for actorID in range( os.cpu_count() ):
-            learnerChan, actorChan = multiprocessing.Pipe()
-            actorChans.append(actorChan)
-            actor = ActorAgent(game, learnerChan, actorID, load)
-            proc = multiprocessing.Process(target=actor.explore, args=(100,))
+        weightChans = []
+        expChans = []
+        for actorID in range( os.cpu_count() // 2 ):
+            weightsChan = multiprocessing.Queue()
+            expChan = multiprocessing.Queue()
+            weightChans.append(weightsChan)
+            expChans.append(expChan)
+            actorMemory = ActorReplayMemory(expChan)
+            render = False
+            if actorID == 0:
+                render = True
+            actor = ActorAgent(game, actorMemory, weightsChan, actorID, render, load)
+            proc = multiprocessing.Process(target=actor.explore)
             processes.append(proc)
-            proc.start()
             print("Actor", actorID, "created")
 
-        buildMemory(game, memory, 64)
-        learner = LearnerAgent(agentName, game.getActionSpace(), actorChans, load)
-        learner.learn(memory, 10000)
-        #proc = multiprocessing.Process(target=learner.learn, args=(memory,100))
-        #processes.append(proc)
-        #proc.start()
-
+        learnerMemory = LearnerReplayMemory(expChans)
+        print("Building random replay...")
+        buildMemory(game, learnerMemory, 128)
+        print("Starting actors...")
         for proc in processes:
-            proc.join()
-
+            proc.start()
+        print("Begin learning...")
+        learner = LearnerAgent(learnerMemory, agentName, game.getActionSpace(), weightChans, load)
+        learner.learn()
 
 if __name__ == "__main__":
     """
