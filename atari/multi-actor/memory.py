@@ -88,7 +88,10 @@ class PriorityReplayMemory:
         self.tree = SumTree(capacity)
       
     def newLeaf(self, exp):
-        self.tree.add(self.maxPriority, exp) 
+        priority = np.max(self.tree.tree[-self.tree.capacity:])
+        if priority == 0:
+            priority = self.maxPriority
+        self.tree.add(priority, exp) 
 
     def _annealBeta(self):
         self.beta = min(1.0, self.beta+self.betaAnneal ) 
@@ -123,9 +126,11 @@ class PriorityReplayMemory:
         for ti, priority in zip(treeIdx, errors):
             self.tree.update(ti, priority)
 
+    def __len__(self):
+        return self.tree.n_entries
 
 class LearnerReplayMemory:
-    def __init__(self, actorChans, size=500000):
+    def __init__(self, actorChans, size=150000):
         self.priorities = PriorityReplayMemory(size)
         self.actorChans = actorChans
 
@@ -136,7 +141,6 @@ class LearnerReplayMemory:
         self.priorities.batchUpdate(indices, newPriorities)
 
     def sample(self, n):
-        self.load()
         A = {"curr_states": [], "next_states": [], 
                      "actions": [], "rewards":[], "is_terminal": []}
         experiences, treeIndices, isWeights = self.priorities.sample(n)
@@ -152,28 +156,34 @@ class LearnerReplayMemory:
         return treeIndices, batch, isWeights
 
     def load(self):
+        ready = []
         for chan in self.actorChans:
-            if not chan.empty():
-                print("Loading")
+            while not chan.empty():
+                #print("Loading")
                 experiences = chan.get()
-                for exp in experiences:
-                    self.append(exp)
+                ready.append(experiences)
+        for experiences in ready:
+            for exp in experiences:
+                self.append(exp)
+
+    def __len__(self):
+        return len(self.priorities)
 
 
 class ActorReplayMemory:
-    def __init__(self, learnerChan, size=2**13):
+    def __init__(self, learnerChan, thresh):
         self.experiences = []
-        self.size = size
+        self.thresh = thresh
         self.learnerChan = learnerChan
 
     def append(self, exp):
         self.experiences.append(exp)
-        if len(self.experiences) == self.size:
+        if len(self.experiences) == self.thresh:
             self.dump()
 
     def dump(self):
-        print("Dumping")
-        self.learnerChan.put( self.experiences )
+        #print("Dumping")
+        self.learnerChan.put( self.experiences[:] )
         self.experiences.clear()
 
 

@@ -9,6 +9,8 @@ class Atari:
         self.lives = None
         self.framesAfterDeath = None
         self.state = None
+        self.score = None
+        self.episode = None
 
     def _processFrame(self, frame):
         # grayscale
@@ -22,19 +24,23 @@ class Atari:
 
     def reset(self):
         frame = self.env.reset() 
+        self.episode = [frame]
         frame = self._processFrame( frame )
         self.state = RingBuffer(4)
         for _ in range(4):
             self.state.append(frame)
         self.lives = self.env.ale.lives()
         self.framesAfterDeath = 0
+        self.score = 0
         return self._getState()
 
     def step(self, action):
-        if None in [self.lives, self.framesAfterDeath]:
+        if None in [self.lives, self.framesAfterDeath, self.score, self.episode]:
             raise RuntimeError("step called before reset")
 
         obs, reward, done, info = self.env.step(action)
+        self.score += reward
+        self.episode.append(obs)
         self.state.append( self._processFrame(obs) )
 
         # assume no life has been lost
@@ -54,15 +60,34 @@ class Atari:
 
         return self._getState(), np.sign(reward), done, info
     
+    def saveEpisode(self):
+        if self.episode is None:
+            raise RuntimeError("no episode to save")
+        pathOut = self.game + "_best_episode.avi"
+        fps = 35.0
+        height, width, _ = self.episode[0].shape
+        size = (width, height)
+        fourcc = cv2.VideoWriter_fourcc(*'DIVX')
+        out = cv2.VideoWriter(pathOut, fourcc, fps, size)
+        for i in range(len(self.episode)):
+            frame = cv2.cvtColor(self.episode[i], cv2.COLOR_RGB2BGR)
+            out.write(frame)
+        out.release()
+        print("Episode saved.")
+
     def getFramesAfterDeath(self):
         if self.framesAfterDeath is None:
             raise RuntimeError("info request before reset")
         return self.framesAfterDeath
-
+    def getScore(self):
+        if self.score is None:
+            raise RuntimeError("info request before reset")
+        return int( self.score )
     def getActionSpace(self):
         return self.env.action_space.n
     def getActionMeanings(self):
         return self.env.unwrapped.get_action_meanings()
+
     def render(self):
         self.env.render()
     def close(self):

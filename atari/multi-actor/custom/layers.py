@@ -33,6 +33,8 @@ class Noise(Layer):
             return output
         return K.in_train_phase(noised, inputs, training=training)
 
+
+
     def get_config(self):
         config = {'stddev': self.stddev, 'kernel_initializer': self.kernel_initializer}
         base_config = super(Noise, self).get_config()

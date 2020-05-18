@@ -17,15 +17,45 @@ def buildMemory(game, memory, episodes):
             s0 = s1
         print("Episode", str(eps) + '/' + str(episodes) )
 
+def train(game, agentName, load):
+    processes = []
+    weightChans = []
+    expChans = []
+    oracleScore = multiprocessing.Value("i", 0)
+    for actorID in range( os.cpu_count() // 2 ):
+        weightsChan = multiprocessing.Queue()
+        expChan = multiprocessing.Queue()
+        weightChans.append(weightsChan)
+        expChans.append(expChan)
+        render = False
+        if actorID == 0:
+            render = True
+        actorMemory = ActorReplayMemory(expChan, thresh=2**11)
+        actor = ActorAgent(game, actorMemory, weightsChan, actorID, render, oracleScore)
+        proc = multiprocessing.Process(target=actor.explore)
+        processes.append(proc)
+        print("Actor", actorID, "created")
+
+    learnerMemory = LearnerReplayMemory(expChans, size=150000)
+    print("Starting actors...")
+    for proc in processes:
+        proc.start()
+    print("Begin learning...")
+    learner = LearnerAgent(learnerMemory, agentName, game.getActionSpace(), weightChans, load)
+    learner.learn()
+
+
 def main():
-    game = Atari("BreakoutDeterministic-v4")
-    agentName = "atari_agent_breakout"
+    #game = Atari("BreakoutDeterministic-v4")
+    #agentName = "atari_agent_breakout"
     #game = Atari("PongDeterministic-v4")
     #agentName = "atari_agent_pong"
     #game = Atari("MsPacmanDeterministic-v4")
-    #agentName = "atari_agent_ms_pacman"
+    #agentName = "atari_agent_ms_pacman_best"
     #game = Atari("SpaceInvadersDeterministic-v4")
     #agentName = "atari_agent_space_invaders"
+    game = Atari("MontezumaRevengeDeterministic-v4")
+    agentName = "atari_agent_montezuma_revenge"
     print("Action meanings:", game.getActionMeanings())
 
     # set to None if no model to load
@@ -34,45 +64,13 @@ def main():
     #load = "atari_agent_pong_best.h5"
     #load = "atari_agent_ms_pacman_best.h5"
     #load = "atari_agent_space_invaders.h5"
+    #load = "atari_agent_montezuma_revenge_best.h5"
 
     trainAndSave = True
 
     if trainAndSave:
+        train(game, agentName, load)
 
-        processes = []
-
-        weightChans = []
-        expChans = []
-        for actorID in range( os.cpu_count() // 2 ):
-            weightsChan = multiprocessing.Queue()
-            expChan = multiprocessing.Queue()
-            weightChans.append(weightsChan)
-            expChans.append(expChan)
-            actorMemory = ActorReplayMemory(expChan)
-            render = False
-            if actorID == 0:
-                render = True
-            actor = ActorAgent(game, actorMemory, weightsChan, actorID, render, load)
-            proc = multiprocessing.Process(target=actor.explore)
-            processes.append(proc)
-            print("Actor", actorID, "created")
-
-        learnerMemory = LearnerReplayMemory(expChans)
-        print("Building random replay...")
-        buildMemory(game, learnerMemory, 128)
-        print("Starting actors...")
-        for proc in processes:
-            proc.start()
-        print("Begin learning...")
-        learner = LearnerAgent(learnerMemory, agentName, game.getActionSpace(), weightChans, load)
-        learner.learn()
 
 if __name__ == "__main__":
-    """
-    if tf.test.gpu_device_name():
-        print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
-    else:
-        print("Please install GPU version of TF")
-    with tf.device('/CPU:0'):
-    """
     main()
