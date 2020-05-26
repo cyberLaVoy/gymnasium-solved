@@ -30,13 +30,13 @@ def train(game, agentName, load):
         render = False
         if actorID == 0:
             render = True
-        actorMemory = ActorReplayMemory(expChan, thresh=2**11)
+        actorMemory = ActorReplayMemory(expChan, thresh=2**10)
         actor = ActorAgent(game, actorMemory, weightsChan, actorID, render, oracleScore)
         proc = multiprocessing.Process(target=actor.explore)
         processes.append(proc)
         print("Actor", actorID, "created")
 
-    learnerMemory = LearnerReplayMemory(expChans, size=150000)
+    learnerMemory = LearnerReplayMemory(expChans, size=100000)
     print("Starting actors...")
     for proc in processes:
         proc.start()

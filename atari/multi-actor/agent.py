@@ -107,9 +107,11 @@ class ActorAgent(Agent):
         self.game.close()
 
     def _updateWeights(self):
+        weights = None
         while not self.learnerChan.empty():
             weights = self.learnerChan.get()
-        self.model.set_weights( weights )
+        if weights is not None:
+            self.model.set_weights( weights )
 
 
 class LearnerAgent(Agent):
