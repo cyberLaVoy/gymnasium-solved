@@ -22,7 +22,7 @@ def train(game, agentName, load):
     weightChans = []
     expChans = []
     oracleScore = multiprocessing.Value("i", 0)
-    for actorID in range( os.cpu_count() // 2 ):
+    for actorID in range( os.cpu_count() // 2 - 1 ):
         weightsChan = multiprocessing.Queue()
         expChan = multiprocessing.Queue()
         weightChans.append(weightsChan)
@@ -46,16 +46,16 @@ def train(game, agentName, load):
 
 
 def main():
-    #game = Atari("BreakoutDeterministic-v4")
-    #agentName = "atari_agent_breakout"
+    game = Atari("BreakoutDeterministic-v4")
+    agentName = "atari_agent_breakout"
     #game = Atari("PongDeterministic-v4")
     #agentName = "atari_agent_pong"
     #game = Atari("MsPacmanDeterministic-v4")
     #agentName = "atari_agent_ms_pacman_best"
     #game = Atari("SpaceInvadersDeterministic-v4")
     #agentName = "atari_agent_space_invaders"
-    game = Atari("MontezumaRevengeDeterministic-v4")
-    agentName = "atari_agent_montezuma_revenge"
+    #game = Atari("MontezumaRevengeDeterministic-v4")
+    #agentName = "atari_agent_montezuma_revenge"
     print("Action meanings:", game.getActionMeanings())
 
     # set to None if no model to load
