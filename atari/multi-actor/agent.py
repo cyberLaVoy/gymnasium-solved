@@ -9,7 +9,8 @@ from tensorflow.keras.initializers import VarianceScaling
 from tensorflow.keras.layers import Dense, Conv2D, Flatten, Input, Lambda
 from tensorflow.keras.optimizers import Adam
 
-from custom.layers import Noise, loadModel
+from custom.layers import Noise, Feedback, loadModel
+from memory import RingBuffer
 
 
 class Agent:
@@ -53,7 +54,7 @@ class Agent:
 
         model = Model(inputs=[framesIn, actionsIn], outputs=filtered)
 
-        opt = Adam( learning_rate=.0001 )
+        opt = Adam( learning_rate=.00025 )
         model.compile(opt, loss="huber_loss")
         return model
 
@@ -61,9 +62,6 @@ class Agent:
         state = np.array( [state] )
         mask = np.ones( (1, self.actionSpace) )
         return self.model.predict( [state, mask] )
-
-    def getAction(self, state):
-        return np.argmax( self.predict(state) ) 
 
 class ActorAgent(Agent):
     def __init__(self, game, memory, learnerChan, actorID, render, oracleScore):
@@ -78,32 +76,58 @@ class ActorAgent(Agent):
         self.oracleScore = oracleScore
 
     def explore(self):
-        bestScore = 0
+        bestScore = float("-inf")
+        delayLengths = RingBuffer(10000)
+        episodeLengths = RingBuffer(100)
+        delayLengths.append(1)
+        episodeLengths.append(1)
+
         while True:
             #print("act", self.actorID)
             done = False
             s0 = self.game.reset() 
+            delay = 0
+            action = 0
+            boredom = 0
+
             while not done:
-                if self.render:
-                    self.game.render()
-                #choose action
-                if self.game.getFramesAfterDeath() < 2:
-                    a = 1
+                # choose action
+                if np.random.random() <= boredom:
+                    a = np.random.choice( self.actionSpace )
                 else:
-                    a = self.getAction( s0 )
+                    a = np.argmax( self.predict(s0) )
                 # step
                 s1, r, done, info = self.game.step(a)
+                action += 1
+                # reward engineering
+                if r <= 0:
+                    r = 0 - boredom
+                else:
+                    r = 1
                 # add to memory
                 self.memory.append( (s0, s1, a, r, info["life_lost"]) )
                 # upkeep
                 s0 = s1
                 self._updateWeights()
+                if self.render:
+                    self.game.render()
+                # boredom maintenance
+                if r > 0:
+                    delayLengths.append(delay)
+                    delay = 0
+                else:
+                    delay += 1
+                boredom = min(1, delay/delayLengths.max()) * min(1,  action/episodeLengths.max())
+
+            episodeLengths.append(action)
+
             if self.game.getScore() > bestScore:
                 bestScore = self.game.getScore()
                 print("Score:", bestScore, "from actor", self.actorID)
                 if bestScore > self.oracleScore.value:
                     self.oracleScore.value = bestScore
                     self.game.saveEpisode()
+
         self.game.close()
 
     def _updateWeights(self):
@@ -115,7 +139,7 @@ class ActorAgent(Agent):
 
 
 class LearnerAgent(Agent):
-    def __init__(self, memory, agentName, actionSpace, actorsChan, modelLoad=None, targetUpdateFreq=2500, actorUpdateFreq=8, gamma=0.997, sampleSize=64):
+    def __init__(self, memory, agentName, actionSpace, actorsChan, modelLoad=None, targetUpdateFreq=2500, actorUpdateFreq=4, gamma=0.997, sampleSize=64):
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         super().__init__(actionSpace, modelLoad)
         self.name = agentName

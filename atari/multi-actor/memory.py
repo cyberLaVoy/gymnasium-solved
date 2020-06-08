@@ -14,6 +14,11 @@ class RingBuffer:
         if self.end == self.start:
             self.start = (self.start + 1) % len(self.data)
 
+    def max(self):
+        return max( [v for v in self] )
+    def sum(self):
+        return sum( [v for v in self] )
+
     def __getitem__(self, idx):
         return self.data[(self.start + idx) % len(self.data)]
 

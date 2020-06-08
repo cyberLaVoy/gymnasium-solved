@@ -16,7 +16,7 @@ class Atari:
         # grayscale
         frame = np.mean(frame, axis=2).astype(np.uint8)
         # down sample
-        frame =cv2.resize(frame, (84, 84))
+        frame = cv2.resize(frame, (84, 84))
         return frame
 
     def _getState(self):

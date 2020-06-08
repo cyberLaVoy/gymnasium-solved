@@ -6,17 +6,6 @@ from agent import LearnerAgent, ActorAgent
 from memory import LearnerReplayMemory, ActorReplayMemory
 # do not import tensorflow here, as it will break the multiprocessing library
 
-def buildMemory(game, memory, episodes):
-    for eps in range(episodes):
-        done = False
-        s0 = game.reset() 
-        while not done:
-            a = np.random.choice( game.getActionSpace() )
-            s1, r, done, info = game.step(a)
-            memory.append( (s0, s1, a, r, info["life_lost"]) )
-            s0 = s1
-        print("Episode", str(eps) + '/' + str(episodes) )
-
 def train(game, agentName, load):
     processes = []
     weightChans = []
@@ -29,14 +18,14 @@ def train(game, agentName, load):
         expChans.append(expChan)
         render = False
         if actorID == 0:
-            render = True
+            render = False
         actorMemory = ActorReplayMemory(expChan, thresh=2**10)
         actor = ActorAgent(game, actorMemory, weightsChan, actorID, render, oracleScore)
         proc = multiprocessing.Process(target=actor.explore)
         processes.append(proc)
         print("Actor", actorID, "created")
 
-    learnerMemory = LearnerReplayMemory(expChans, size=100000)
+    learnerMemory = LearnerReplayMemory(expChans, size=250000)
     print("Starting actors...")
     for proc in processes:
         proc.start()
@@ -46,30 +35,26 @@ def train(game, agentName, load):
 
 
 def main():
-    game = Atari("BreakoutDeterministic-v4")
-    agentName = "atari_agent_breakout"
-    #game = Atari("PongDeterministic-v4")
-    #agentName = "atari_agent_pong"
-    #game = Atari("MsPacmanDeterministic-v4")
-    #agentName = "atari_agent_ms_pacman_best"
-    #game = Atari("SpaceInvadersDeterministic-v4")
-    #agentName = "atari_agent_space_invaders"
-    #game = Atari("MontezumaRevengeDeterministic-v4")
-    #agentName = "atari_agent_montezuma_revenge"
-    print("Action meanings:", game.getActionMeanings())
+    games = [
+             "Breakout", # 0
+             "Pong", # 1
+             "MsPacman", # 2
+             "SpaceInvaders", # 3
+             "Asteroids", # 4
+             "MontezumaRevenge", # 5
+             "Skiing", # 6
+             "Pitfall", # 7
+             "Solaris", # 8
+            ]
+    option = 2
+    game = Atari(games[option]+"Deterministic-v4")
+    agentName = "atari_agent_" + games[option]
 
     # set to None if no model to load
     load = None
-    #load = "atari_agent_breakout_best.h5"
-    #load = "atari_agent_pong_best.h5"
-    #load = "atari_agent_ms_pacman_best.h5"
-    #load = "atari_agent_space_invaders.h5"
-    #load = "atari_agent_montezuma_revenge_best.h5"
+    load = "models/atari_agent_" + games[option] + "_best.h5"
 
-    trainAndSave = True
-
-    if trainAndSave:
-        train(game, agentName, load)
+    train(game, agentName, load)
 
 
 if __name__ == "__main__":
