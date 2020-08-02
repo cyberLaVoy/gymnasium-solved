@@ -1,126 +1,157 @@
 import numpy as np
-import os
+from matplotlib import pyplot as plt
+import os, time
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 
 import tensorflow as tf
 from tensorflow.keras import backend as K
 from tensorflow.keras.models import Model, clone_model
-from tensorflow.keras.initializers import VarianceScaling
-from tensorflow.keras.layers import Dense, Conv2D, Flatten, Input, Lambda
+from tensorflow.keras.layers import Dense, Conv2D, Flatten, Input, Lambda, Concatenate, GaussianNoise
 from tensorflow.keras.optimizers import Adam
 
-from custom.layers import Noise, Feedback, loadModel
+from custom.layers import Noise, loadModel
+from custom.utils import displayFrames, displayMetric
 from memory import RingBuffer
 
 
 class Agent:
-    def __init__(self, actionSpace, modelLoad):
-        self.actionSpace = actionSpace
+    actionSpace = 18
+    beta = .3
+    def _createPolicy(self):
+        startStates = Input( (80,80,4), name="start_states" )
+        actionsIn = Input( (self.actionSpace,), name="actions" )
+        startStatesNorm = Lambda( lambda x: x / 255.0 )(startStates)
 
-        if modelLoad is None:
-            self.model = self._createModel()
-        else:
-            self.model = loadModel(modelLoad)
+        heads = []
+        for _ in range(2):
+            # shared convolutional layers
+            conv = Conv2D(32, 8, strides=4, activation="relu")(startStatesNorm)
+            conv = Conv2D(32, 4, strides=2, activation="relu")(conv)
+            conv = Conv2D(64, 3, strides=2, activation="relu")(conv)
+            conv = Flatten()(conv)
+            # value and advantage layers
+            value = Dense(512, activation="relu")( conv )
+            value = Dense(1)( value )
+            advantage = Dense(512, activation="relu")( conv )
+            advantage = Dense(self.actionSpace)( advantage )
+            h = Lambda( lambda x: x[0]+(x[1]-K.mean(x[1])) )( [value, advantage] )
+            h = Lambda( lambda x: x[0]*x[1] )( [h, actionsIn] )
+            heads.append(h)
 
-        self.model.summary()
-
-    def _createModel(self):
-        init = VarianceScaling( scale=2 )
-        framesIn = Input((84,84,4), name="frames")
-        actionsIn = Input((self.actionSpace,), name="mask")
-
-        ### shared convolutional layers
-        normalized = Lambda(lambda x: x / 255.0, name="prep0")(framesIn)
-        # interactions between pixels
-        conv0 = Conv2D(32, 8, strides=4, activation="relu", kernel_initializer=init, name="conv0")(normalized)
-        conv1 = Conv2D(32, 4, strides=2, activation="relu", kernel_initializer=init, name="conv1")(conv0)
-        # learned summarization
-        conv2 = Conv2D(128, 3, strides=3, activation="relu", kernel_initializer=init, name="conv2")(conv1)
-        flattened = Flatten(name="conv_flatten")(conv2)
-
-        ### dual architecture, where we split advantage and value learning
-        # advantage split (advantage of taking action a_i in state s)
-        split1 = Dense(512, activation="relu", kernel_initializer=init)(flattened)
-        split1 = Noise(stddev=1, kernel_initializer=init)(split1)
-        advantage = Dense(self.actionSpace, kernel_initializer=init)(split1)
-        # value split (value of being in state s)
-        split2 = Dense(512, activation="relu", kernel_initializer=init)(flattened)
-        split2 = Noise(stddev=1, kernel_initializer=init)(split2)
-        value = Dense(1, kernel_initializer=init)(split2)
-        # advantage/value combined
-        policy = Lambda( lambda x: x[0]+(x[1]-K.mean(x[1])) )([value, advantage])
-
-        filtered = Lambda( lambda x: x[0]*x[1] )([policy, actionsIn])
-
-        model = Model(inputs=[framesIn, actionsIn], outputs=filtered)
-
-        opt = Adam( learning_rate=.00025 )
-        model.compile(opt, loss="huber_loss")
+        model = Model(inputs=[startStates, actionsIn], outputs=heads)
+        model.compile(Adam( learning_rate=.00025 ), loss="huber_loss")
         return model
 
-    def predict(self, state):
-        state = np.array( [state] )
-        mask = np.ones( (1, self.actionSpace) )
-        return self.model.predict( [state, mask] )
+    def _createRND(self):
+        states = Input( (80,80,1) )
+        ### random network distilation
+        # fixed network
+        fixed = Conv2D(16, 8, strides=4, trainable=False)(states)
+        fixed = Conv2D(16, 4, strides=2, trainable=False)(fixed)
+        fixed = Conv2D(32, 3, strides=2, trainable=False)(fixed)
+        fixed = Flatten()(fixed)
+        fixed = Dense(256, trainable=False)(fixed)
+        # distribution network
+        dist = Conv2D(16, 8, strides=4)(states)
+        dist = Conv2D(16, 4, strides=2)(dist)
+        dist = Conv2D(32, 3, strides=2)(dist)
+        dist = Flatten()(dist)
+        dist = Dense(256)(dist)
+
+        model = Model(inputs=states, outputs=[fixed, dist])
+        model.compile(Adam( learning_rate=.0005 ), loss="mse")
+        return model
 
 class ActorAgent(Agent):
-    def __init__(self, game, memory, learnerChan, actorID, render, oracleScore):
-        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+    def __init__(self, game, memPolicy, memRND, learnerChan, actorID, oracleScore, render, enableGPU=False):
+        if enableGPU:
+            os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+        else:
+            os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
         # actor must create its own model, then load weights from learner
-        super().__init__(game.getActionSpace(), None)
+        self.policy = self._createPolicy()
+        self.netRND = self._createRND()
         self.game = game
-        self.memory = memory
+        self.memPolicy = memPolicy
+        self.memRND = memRND
         self.learnerChan = learnerChan
         self.actorID = actorID
         self.render = render
         self.oracleScore = oracleScore
 
     def explore(self):
-        bestScore = float("-inf")
-        delayLengths = RingBuffer(10000)
-        episodeLengths = RingBuffer(100)
-        delayLengths.append(1)
-        episodeLengths.append(1)
+        if self.render:
+            infoStream = RingBuffer(256)
 
+        novMean = 0
+        novSquareSum = 0
+        novResetItters = 128
+        novEngageItters = 256
+        bestScore = float("-inf")
+        itter = 0
+        updates = 0
+        noiseLevel = .01
+        noops = np.random.choice( 32 )
+        
         while True:
-            #print("act", self.actorID)
+
             done = False
             s0 = self.game.reset() 
-            delay = 0
-            action = 0
-            boredom = 0
 
             while not done:
+                itter += 1
+
                 # choose action
-                if np.random.random() <= boredom:
+                if noops > 0:
+                    a = 0
+                    noops -= 1
+                elif np.random.random() <= noiseLevel:
                     a = np.random.choice( self.actionSpace )
                 else:
-                    a = np.argmax( self.predict(s0) )
+                    Q_e, Q_i = self.predictPolicy( s0 )
+                    a = np.argmax( Q_e + self.beta*Q_i )
+
                 # step
-                s1, r, done, info = self.game.step(a)
-                action += 1
-                # reward engineering
-                if r <= 0:
-                    r = 0 - boredom
+                s1, re, done, info = self.game.step(a)
+
+                # append to rnd memory
+                newFrame = self.game.getFrameChange()
+                self.memRND.append( newFrame )
+
+                # reward engineering (intrinsic)
+                normFrame = self.memRND.normalize(newFrame)
+                fixed, dist = self.predictRND( normFrame )
+                novelty = np.sqrt(np.sum((dist-fixed)**2))
+                prevMean = novMean
+                novMean += (novelty-novMean)/itter
+                novSquareSum += (novelty-novMean)*(novelty-prevMean)
+                novStdDev = np.sqrt(novSquareSum/itter)
+                if updates == novResetItters:
+                    novMean = 0
+                    novSquareSum = 0
+                if updates >= novEngageItters:
+                    ri = np.tanh( (novelty-novMean)/(novStdDev+.0001) ) 
                 else:
-                    r = 1
-                # add to memory
-                self.memory.append( (s0, s1, a, r, info["life_lost"]) )
-                # upkeep
-                s0 = s1
-                self._updateWeights()
+                    ri = 0 
+
+                # append to policy memeory
+                self.memPolicy.append( (s0, s1, a, re, ri, info["life_lost"]) )
+
+                # display info
                 if self.render:
                     self.game.render()
-                # boredom maintenance
-                if r > 0:
-                    delayLengths.append(delay)
-                    delay = 0
-                else:
-                    delay += 1
-                boredom = min(1, delay/delayLengths.max()) * min(1,  action/episodeLengths.max())
+                    displayFrames((normFrame+5)/10)
+                    infoStream.append( ri+re )
+                    if itter % 16 == 0:
+                        displayMetric(infoStream.data, "Info Stream")
 
-            episodeLengths.append(action)
+                # step upkeep
+                if self._updateWeights():
+                    updates += 1
+                s0 = s1
 
+
+            # record game score, if beter than best so far
             if self.game.getScore() > bestScore:
                 bestScore = self.game.getScore()
                 print("Score:", bestScore, "from actor", self.actorID)
@@ -130,80 +161,161 @@ class ActorAgent(Agent):
 
         self.game.close()
 
+
     def _updateWeights(self):
-        weights = None
+        update = False
+        weightsPolicy = None
+        weightsRND = None
         while not self.learnerChan.empty():
             weights = self.learnerChan.get()
-        if weights is not None:
-            self.model.set_weights( weights )
+            if weights[0] == "policy":
+                weightsPolicy = weights[1]
+            if weights[0] == "rnd":
+                weightsRND = weights[1]
+        if weightsPolicy is not None:
+            self.policy.set_weights( weightsPolicy )
+            update = True
+        if weightsRND is not None:
+            self.netRND.set_weights( weightsRND )
+            update = True
+        return update
+
+    def predictPolicy(self, state):
+        state = np.array( [state] )
+        mask = np.ones( (1, self.actionSpace) )
+        return self.policy.predict( [state, mask] )
+
+    def predictRND(self, state):
+        state = np.array( [state] )
+        return self.netRND.predict( state )
+
 
 
 class LearnerAgent(Agent):
-    def __init__(self, memory, agentName, actionSpace, actorsChan, modelLoad=None, targetUpdateFreq=2500, actorUpdateFreq=4, gamma=0.997, sampleSize=64):
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-        super().__init__(actionSpace, modelLoad)
-        self.name = agentName
-        self.modelName = self.name + ".h5"
+    def __init__(self, memory, agentName, actorsChan, netType,
+                 load, saveFreq, 
+                 actorUpdateFreq, sampleSize,
+                 enableGPU):
+        if enableGPU:
+            os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+        else:
+            os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
+        self.netType = netType
+        if netType == "policy":
+            self.model = self._createPolicy()
+        if netType == "rnd":
+            self.model = self._createRND()
+        self.load = load
+        if load is not None:
+            temp = loadModel(load)
+            self.model.set_weights(temp.get_weights()) 
+
+        self.name = agentName + '_' + netType + ".h5"
         self.memory = memory
 
         self.actorUpdateFreq = actorUpdateFreq
         self.actorsChan = actorsChan
-
-        self.targetUpdateFreq = targetUpdateFreq
-        self.gamma = gamma
         self.sampleSize = sampleSize
+        self.saveFreq = saveFreq
 
+    def save(self):
+        print("Saving model:", self.name)
+        self.model.save( self.name )
+    def _updateActors(self):
+        for chan in self.actorsChan:
+            chan.put((self.netType, self.model.get_weights()))
+
+
+class LearnerAgentPolicy(LearnerAgent):
+    netType = "policy"
+    def __init__(self, memory, agentName, actorsChan,
+                 load, saveFreq=2000, actorUpdateFreq=4, sampleSize=64, enableGPU=False,  
+                 gamma_e=0.997, gamma_i=.99, targetUpdateFreq=1500):
+        super().__init__(memory, agentName, actorsChan, self.netType,
+                 load, saveFreq, actorUpdateFreq, sampleSize, enableGPU)
+
+        self.gamma_e = gamma_e
+        self.gamma_i = gamma_i
+        self.targetUpdateFreq = targetUpdateFreq
         self.targetNet = clone_model(self.model)
         self._updateTarget()
 
-    def __del__(self):
-        self.model.save(self.modelName)
-    
     def learn(self):
         learnIter = 0
         while True:
             self.memory.load()
             if len(self.memory) < self.sampleSize:
                 continue
-            indices, batch, isWeights = self.memory.sample(self.sampleSize) 
-            startStates, nextStates, actions, rewards, isTerminal = batch 
-            actions = self._getActionsMask(actions)
 
-            ### double achitecture, where we predict actions with online model
-            onlineQvalues = self.model.predict( [nextStates, np.ones(actions.shape)] )
-            predActions = np.argmax(onlineQvalues, axis=1)
-            actionsMask = self._getActionsMask(predActions)
+            self.learnPolicy()
 
-            # predict Q values from actions mask
-            futureQ = self.targetNet.predict( [nextStates, actionsMask] )
-            futureQ = np.max(futureQ, axis=1)
-            # set what Q values should be, for given actions
-            targetQ = np.zeros(actions.shape)
-            targetQ[actions] = rewards + (1-isTerminal)*self.gamma*futureQ
-            # so if we start in these states, the rewards should look like this
-            self.model.fit([startStates, actions], targetQ, sample_weight=isWeights, batch_size=self.sampleSize, verbose=0)
-            
             learnIter += 1
-            if learnIter % self.targetUpdateFreq == 0:
+            if learnIter % self.targetUpdateFreq == 0 or (learnIter < self.targetUpdateFreq and self.load is None):
                 self._updateTarget()
             if learnIter % self.actorUpdateFreq == 0:
                 self._updateActors()
+            if learnIter % self.saveFreq == 0:
+                self.save()
 
-            tdError = abs( np.max(targetQ, axis=1) - np.max(onlineQvalues, axis=1) )
-            self.memory.updatePriorities(indices, tdError)
 
+    def learnPolicy(self):
+        indices, batch, isWeights = self.memory.sample(self.sampleSize)
+        startStates, nextStates, actions, rewards_e, rewards_i, isTerminal = batch 
+        actions = self._getActionsMask(actions)
 
-    def _updateTarget(self):
-        #print("Updating target network...")
-        self.targetNet.set_weights(self.model.get_weights()) 
-    def _updateActors(self):
-        #print("Sending actor weights...")
-        for chan in self.actorsChan:
-            chan.put(self.model.get_weights())
+        ### double achitecture, where we predict actions with online model
+        onlineQ_e, onlineQ_i = self.model.predict( [nextStates, np.ones(actions.shape)] )
+        onlineQ = onlineQ_e + self.beta*onlineQ_i
+        actionsMask = self._getActionsMask( np.argmax(onlineQ, axis=1) )
+        # predict Q from actions mask
+        futureQ_e, futureQ_i = self.targetNet.predict( [nextStates, actionsMask] )
+        # set what Q should be, for given actions
+        targetQ_e = np.zeros(actions.shape)
+        targetQ_e[actions] = rewards_e + (1-isTerminal)*self.gamma_e*np.max(futureQ_e, axis=1)
+        targetQ_i = np.zeros(actions.shape)
+        targetQ_i[actions] = rewards_i + (1-isTerminal)*self.gamma_i*np.max(futureQ_i, axis=1)
+        targetQ = targetQ_e + self.beta*targetQ_i
+        # so if we start in these states, the rewards should look like this
+        self.model.fit([startStates, actions], [targetQ_e, targetQ_i], sample_weight=[isWeights, isWeights], verbose=0)
+
+        tdError = abs( np.max(targetQ, axis=1) - np.max(onlineQ, axis=1) )
+        self.memory.updatePriorities(indices, tdError)           
 
     def _getActionsMask(self, actions):
         mask = np.zeros((actions.size, self.actionSpace)).astype(np.bool)
         mask[np.arange(actions.size), actions] = 1
         return mask
 
+    def _updateTarget(self):
+        self.targetNet.set_weights(self.model.get_weights()) 
+
+
+class LearnerAgentRND(LearnerAgent):
+    netType = "rnd"
+    def __init__(self, memory, agentName, actorsChan, load, 
+                 saveFreq=2000, actorUpdateFreq=4, sampleSize=64, enableGPU=False):
+        super().__init__(memory, agentName, actorsChan, self.netType,
+                 load, saveFreq, actorUpdateFreq, sampleSize, enableGPU)
+
+    def learn(self):
+        learnIter = 0
+        while True:
+            self.memory.load()
+            if len(self.memory) < self.sampleSize:
+                continue
+
+            self.learnRND()
+
+            learnIter += 1
+            if learnIter % self.actorUpdateFreq == 0:
+                self._updateActors()
+            if learnIter % self.saveFreq == 0:
+                self.save()
+
+    def learnRND(self):
+        states = self.memory.sample( self.sampleSize )
+        states = np.array( states )
+        fixed, _ = self.model.predict( states )
+        self.model.fit(states, [fixed, fixed], verbose=0)
 

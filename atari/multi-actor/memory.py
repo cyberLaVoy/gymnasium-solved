@@ -16,8 +16,19 @@ class RingBuffer:
 
     def max(self):
         return max( [v for v in self] )
+    def min(self):
+        return min( [v for v in self] )
     def sum(self):
         return sum( [v for v in self] )
+    def std(self):
+        return np.array([v for v in self]).std()
+    def mean(self):
+        return np.array([v for v in self]).mean()
+
+    def sample(self, k):
+        if k > len(self):
+            k = len(self)
+        return random.sample([v for v in self], k)
 
     def __getitem__(self, idx):
         return self.data[(self.start + idx) % len(self.data)]
@@ -134,8 +145,8 @@ class PriorityReplayMemory:
     def __len__(self):
         return self.tree.n_entries
 
-class LearnerReplayMemory:
-    def __init__(self, actorChans, size=150000):
+class PolicyReplayMemory:
+    def __init__(self, actorChans, size):
         self.priorities = PriorityReplayMemory(size)
         self.actorChans = actorChans
 
@@ -147,17 +158,18 @@ class LearnerReplayMemory:
 
     def sample(self, n):
         A = {"curr_states": [], "next_states": [], 
-                     "actions": [], "rewards":[], "is_terminal": []}
+                     "actions": [], "rewards_e":[], "rewards_i":[], "is_terminal": []}
         experiences, treeIndices, isWeights = self.priorities.sample(n)
         for exp in experiences:
             A["curr_states"].append( exp[0] )
             A["next_states"].append( exp[1] )
             A["actions"].append( exp[2] )
-            A["rewards"].append( exp[3] )
-            A["is_terminal"].append( exp[4] )
+            A["rewards_e"].append( exp[3] )
+            A["rewards_i"].append( exp[4] )
+            A["is_terminal"].append( exp[5] )
         for key in A:
             A[key] = np.array(A[key])
-        batch = (A["curr_states"], A["next_states"], A["actions"], A["rewards"], A["is_terminal"])
+        batch = (A["curr_states"], A["next_states"], A["actions"], A["rewards_e"], A["rewards_i"], A["is_terminal"])
         return treeIndices, batch, isWeights
 
     def load(self):
@@ -175,21 +187,67 @@ class LearnerReplayMemory:
         return len(self.priorities)
 
 
+class RNDReplayMemory:
+    def __init__(self, actorChans, size):
+        self.states = RingBuffer( size )
+        self.actorChans = actorChans
+
+    def append(self, exp):
+        self.states.append(exp)
+
+    def sample(self, k):
+        return self.states.sample(k)
+
+    def load(self):
+        ready = []
+        for chan in self.actorChans:
+            while not chan.empty():
+                states = chan.get()
+                ready.append(states)
+        for states in ready:
+            for state in states:
+                self.append(state)
+
+    def __len__(self):
+        return len(self.states)
+
+
 class ActorReplayMemory:
-    def __init__(self, learnerChan, thresh):
+    def __init__(self, learnerChan, thresh, normalized=False):
         self.experiences = []
         self.thresh = thresh
         self.learnerChan = learnerChan
+        self.normalized = normalized
+        if self.normalized:
+            self.mean = 0
+            self.squaredSum = 0
+            self.processed = 0
 
     def append(self, exp):
+        if self.normalized:
+            self._updateNorm(exp)
         self.experiences.append(exp)
         if len(self.experiences) == self.thresh:
             self.dump()
 
     def dump(self):
-        #print("Dumping")
-        self.learnerChan.put( self.experiences[:] )
+        if self.normalized:
+            experiences = self.normalize( self.experiences[:] )
+        else:
+            experiences = self.experiences[:] 
+        self.learnerChan.put( experiences )
         self.experiences.clear()
 
+    def normalize(self, exp):
+        exp = np.array(exp)
+        stdDev = np.sqrt(self.squaredSum/self.processed)
+        norm = np.clip( (exp-self.mean)/(stdDev+.0001), -5, 5)
+        return np.round( norm ).astype(np.int16) 
 
+    def _updateNorm(self, exp):
+        self.processed += 1
+        expMean = exp.mean()
+        prevMean = self.mean
+        self.mean += (expMean-self.mean)/self.processed
+        self.squaredSum += (expMean-self.mean)*(expMean-prevMean)
 

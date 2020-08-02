@@ -2,37 +2,48 @@ import gym, time, multiprocessing, os
 import numpy as np
 from matplotlib import pyplot as plt
 from atari import Atari
-from agent import LearnerAgent, ActorAgent
-from memory import LearnerReplayMemory, ActorReplayMemory
+from agent import LearnerAgentPolicy, LearnerAgentRND, ActorAgent
+from memory import PolicyReplayMemory, RNDReplayMemory, ActorReplayMemory
 # do not import tensorflow here, as it will break the multiprocessing library
 
-def train(game, agentName, load):
+def train(game, agentName, loadPolicy, loadRND, cpuCount, memSizePolicy, memSizeRND, actorThreshPolicy, actorThreshRND, render, enableLearnerGPU):
     processes = []
     weightChans = []
-    expChans = []
+    expChansPolicy = []
+    expChansRND = []
     oracleScore = multiprocessing.Value("i", 0)
-    for actorID in range( os.cpu_count() // 2 - 1 ):
+
+    for actorID in range( cpuCount ):
+
+        expChanPolicy = multiprocessing.Queue()
+        expChanRND = multiprocessing.Queue()
+        expChansPolicy.append(expChanPolicy)
+        expChansRND.append(expChanRND)
+
         weightsChan = multiprocessing.Queue()
-        expChan = multiprocessing.Queue()
         weightChans.append(weightsChan)
-        expChans.append(expChan)
-        render = False
-        if actorID == 0:
-            render = False
-        actorMemory = ActorReplayMemory(expChan, thresh=2**10)
-        actor = ActorAgent(game, actorMemory, weightsChan, actorID, render, oracleScore)
+
+        actorMemPolicy = ActorReplayMemory(expChanPolicy, thresh=actorThreshPolicy)
+        actorMemRND = ActorReplayMemory(expChanRND, thresh=actorThreshRND, normalized=True)
+
+        actor = ActorAgent(game, actorMemPolicy, actorMemRND, weightsChan, actorID, oracleScore, 
+                           actorID == 0 and render)
+
         proc = multiprocessing.Process(target=actor.explore)
         processes.append(proc)
+
         print("Actor", actorID, "created")
 
-    learnerMemory = LearnerReplayMemory(expChans, size=250000)
-    print("Starting actors...")
+    learnerMemRND = RNDReplayMemory(expChansRND, size=memSizeRND)
+    learner = LearnerAgentRND(learnerMemRND, agentName, weightChans, loadRND)
+    processes.append( multiprocessing.Process(target=learner.learn) )
+
     for proc in processes:
         proc.start()
-    print("Begin learning...")
-    learner = LearnerAgent(learnerMemory, agentName, game.getActionSpace(), weightChans, load)
-    learner.learn()
 
+    learnerMemPolicy = PolicyReplayMemory(expChansPolicy, size=memSizePolicy)
+    learner = LearnerAgentPolicy(learnerMemPolicy, agentName, weightChans, loadPolicy, enableGPU=enableLearnerGPU)
+    learner.learn()
 
 def main():
     games = [
@@ -41,20 +52,36 @@ def main():
              "MsPacman", # 2
              "SpaceInvaders", # 3
              "Asteroids", # 4
+
              "MontezumaRevenge", # 5
              "Skiing", # 6
              "Pitfall", # 7
              "Solaris", # 8
+
+             "Enduro", # 9
             ]
-    option = 2
-    game = Atari(games[option]+"Deterministic-v4")
+    option = 5
+    game = Atari( games[option]+"Deterministic-v4" )
+    print(game.env.unwrapped.get_action_meanings())
     agentName = "atari_agent_" + games[option]
 
     # set to None if no model to load
-    load = None
-    load = "models/atari_agent_" + games[option] + "_best.h5"
+    loadPolicy = None
+    loadRND = None
+    #load = "models/atari_agent_" + games[option] + "_best.h5"
+    #load = "atari_agent_" + games[option] + ".h5"
 
-    train(game, agentName, load)
+    cpuCount = os.cpu_count() - 4
+
+    actorThreshPolicy = 2**9
+    memSizePolicy = 2**17
+
+    actorThreshRND = 2**9
+    memSizeRND = 2**17
+
+    render = True
+    enableLearnerGPU = True
+    train(game, agentName, loadPolicy, loadRND, cpuCount, memSizePolicy, memSizeRND, actorThreshPolicy, actorThreshRND, render, enableLearnerGPU)
 
 
 if __name__ == "__main__":

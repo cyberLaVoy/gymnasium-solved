@@ -1,4 +1,4 @@
-import gym, cv2
+import gym, cv2, psutil
 import numpy as np
 from memory import RingBuffer
 
@@ -16,15 +16,19 @@ class Atari:
         # grayscale
         frame = np.mean(frame, axis=2).astype(np.uint8)
         # down sample
-        frame = cv2.resize(frame, (84, 84))
+        frame = cv2.resize(frame, (80, 80), interpolation=cv2.INTER_CUBIC)
         return frame
 
     def _getState(self):
         return np.dstack( [self.state[i] for i in range(4)] )
 
+    def getFrameChange(self):
+        return np.reshape(self.state[3]-self.state[2], (80,80,1))
+
     def reset(self):
         frame = self.env.reset() 
-        self.episode = [frame]
+        self.episode = RingBuffer(2048)
+        self.episode.append(frame)
         frame = self._processFrame( frame )
         self.state = RingBuffer(4)
         for _ in range(4):
@@ -38,6 +42,8 @@ class Atari:
         if None in [self.lives, self.framesAfterDeath, self.score, self.episode]:
             raise RuntimeError("step called before reset")
 
+        if action >= self.env.action_space.n: 
+            action = 0
         obs, reward, done, info = self.env.step(action)
         self.score += reward
         self.episode.append(obs)

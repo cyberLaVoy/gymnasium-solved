@@ -110,13 +110,13 @@ def main():
     #load = "atari_agent_breakout_best.h5"
     #load = "atari_agent_pong_best.h5"
     #load = "atari_agent_ms_pacman_best.h5"
-    load = "atari_agent_space_invaders.h5"
+    #load = "atari_agent_space_invaders.h5"
 
     trainAndSave = True
     testAndObserve = False
 
-    render = False
-    attention = False
+    render = True
+    attention = True
 
     if trainAndSave:
         agent = Agent(agentName, game.getActionSpace(), modelLoad=load, attentionView=attention)

@@ -51,11 +51,10 @@ class Agent:
         ### shared convolutional layers
         normalized = Lambda(lambda x: x / 255.0, name="prep0")(framesIn)
         # interactions between pixels
-        conv0 = Conv2D(16, 8, strides=4, activation="relu", kernel_initializer=init, name="conv0")(normalized)
-        conv1 = Conv2D(32, 4, strides=2, activation="relu", kernel_initializer=init, name="conv1")(conv0)
-        # learned summarization
-        conv2 = Conv2D(128, 3, strides=3, activation="relu", kernel_initializer=init, name="conv2")(conv1)
-        flattened = Flatten()(conv2)
+        conv = Conv2D(32, 8, strides=4, activation="relu", kernel_initializer=init, name="conv0")(normalized)
+        conv = Conv2D(32, 4, strides=2, activation="relu", kernel_initializer=init, name="conv1")(conv)
+        conv = Conv2D(32, 3, strides=2, activation="relu", kernel_initializer=init, name="conv2")(conv)
+        flattened = Flatten()(conv)
 
         if self.dual:
             ### dual architecture, where we split advantage and value learning
