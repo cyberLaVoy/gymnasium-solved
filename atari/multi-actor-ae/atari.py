@@ -1,6 +1,6 @@
 import gym, cv2, psutil
 import numpy as np
-from custom.memory import RingBuffer
+from memory import RingBuffer
 
 class Atari:
     def __init__(self, game):
@@ -16,11 +16,18 @@ class Atari:
         # grayscale
         frame = np.mean(frame, axis=2)
         # down sample
-        frame = cv2.resize(frame, (84, 84), interpolation=cv2.INTER_CUBIC)
+        frame = cv2.resize(frame, (84, 84))
+        # reshape 
+        frame = np.reshape(frame, (84, 84, 1))
         return frame.astype(np.uint8)
 
     def _getState(self):
         return np.dstack( [self.state[i] for i in range(4)] )
+
+    def getStateChange(self):
+        change = self.state[3]-self.state[2]
+        change = np.where(change > 0, 1, 0)
+        return np.reshape( change, (84,84,1) ).astype(np.uint8)
 
     def reset(self):
         frame = self.env.reset() 

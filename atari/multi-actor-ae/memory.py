@@ -1,7 +1,6 @@
 import numpy as np
 from custom.memory import RingBuffer, PriorityReplayMemory
 
-
 class PolicyReplayMemory:
     def __init__(self, actorChans, size):
         self.priorities = PriorityReplayMemory(size)
@@ -32,7 +31,42 @@ class PolicyReplayMemory:
         ready = []
         for chan in self.actorChans:
             while not chan.empty():
-                #print("Loading")
+                experiences = chan.get()
+                ready.append(experiences)
+        for experiences in ready:
+            for exp in experiences:
+                self.append(exp)
+
+    def __len__(self):
+        return len(self.priorities)
+
+class AEReplayMemory:
+    def __init__(self, actorChans, size):
+        self.priorities = PriorityReplayMemory(size)
+        self.actorChans = actorChans
+
+    def append(self, exp):
+        self.priorities.newLeaf(exp)
+
+    def updatePriorities(self, indices, newPriorities):
+        self.priorities.batchUpdate(indices, newPriorities)
+
+    def sample(self, n):
+        A = {"curr_states": [], "next_states": [], "actions":[]}
+        experiences, treeIndices, isWeights = self.priorities.sample(n)
+        for exp in experiences:
+            A["curr_states"].append( exp[0] )
+            A["next_states"].append( exp[1] )
+            A["actions"].append( exp[2] )
+        for key in A:
+            A[key] = np.array(A[key])
+        batch = (A["curr_states"], A["next_states"], A["actions"])
+        return treeIndices, batch, isWeights
+
+    def load(self):
+        ready = []
+        for chan in self.actorChans:
+            while not chan.empty():
                 experiences = chan.get()
                 ready.append(experiences)
         for experiences in ready:

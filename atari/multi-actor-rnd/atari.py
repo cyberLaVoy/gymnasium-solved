@@ -1,6 +1,6 @@
 import gym, cv2, psutil
 import numpy as np
-from custom.memory import RingBuffer
+from memory import RingBuffer
 
 class Atari:
     def __init__(self, game):
@@ -21,6 +21,9 @@ class Atari:
 
     def _getState(self):
         return np.dstack( [self.state[i] for i in range(4)] )
+
+    def getFrameChange(self):
+        return np.reshape(self.state[3]-self.state[2], (84,84,1))
 
     def reset(self):
         frame = self.env.reset() 
