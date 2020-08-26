@@ -3,9 +3,9 @@ from custom.memory import RingBuffer, PriorityReplayMemory
 
 
 class PolicyReplayMemory:
-    def __init__(self, actorChans, size):
+    def __init__(self, expChan, size):
         self.priorities = PriorityReplayMemory(size)
-        self.actorChans = actorChans
+        self.expChan = expChan
 
     def append(self, exp):
         self.priorities.newLeaf(exp)
@@ -29,31 +29,16 @@ class PolicyReplayMemory:
         return treeIndices, batch, isWeights
 
     def load(self):
-        ready = []
-        for chan in self.actorChans:
-            while not chan.empty():
-                #print("Loading")
-                experiences = chan.get()
-                ready.append(experiences)
-        for experiences in ready:
-            for exp in experiences:
-                self.append(exp)
+        for _ in range(self.expChan.qsize()):
+            self.append( self.expChan.get() )
 
     def __len__(self):
         return len(self.priorities)
 
 
 class ActorReplayMemory:
-    def __init__(self, learnerChan, thresh):
-        self.experiences = []
-        self.thresh = thresh
-        self.learnerChan = learnerChan
+    def __init__(self, expChan):
+        self.expChan = expChan
 
     def append(self, exp):
-        self.experiences.append(exp)
-        if len(self.experiences) == self.thresh:
-            self.dump()
-
-    def dump(self):
-        self.learnerChan.put( self.experiences[:] )
-        self.experiences.clear()
+        self.expChan.put(exp)

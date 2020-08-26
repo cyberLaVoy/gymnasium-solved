@@ -10,9 +10,12 @@ from tensorflow.keras.optimizers import Adam
 
 from custom.layers import Noise, loadModel
 
+DEFAULT_ACTION_SPACE = 18
 
 class Agent:
-    actionSpace = 18
+    def __init__(self, actionSpace):
+        self.actionSpace = actionSpace
+
     def _createPolicy(self):
         startStates = Input( (84,84,4) )
         actionsIn = Input( (self.actionSpace,) )
@@ -23,24 +26,29 @@ class Agent:
         # shared convolutional layers
         conv = Conv2D(32, 8, strides=4, activation="relu")(startStatesNorm)
         conv = Conv2D(32, 4, strides=2, activation="relu")(conv)
-        conv = Conv2D(64, 3, strides=2, activation="relu")(conv)
+        for _ in range(5):
+            conv = Conv2D(16, 2, strides=1, activation="relu")(conv)
         conv = Flatten()(conv)
         # value and advantage layers
-        value = Dense(512, activation="relu")( conv )
+        value = Dense(256, activation="relu")( conv )
+        value = Dense(256, activation="relu")( value )
         value = Noise()( value )
         value = Dense(1)( value )
-        advantage = Dense(512, activation="relu")( conv )
+        advantage = Dense(256, activation="relu")( conv )
+        advantage = Dense(256, activation="relu")( advantage )
         advantage = Noise()( advantage )
         advantage = Dense(self.actionSpace)( advantage )
         policy = Lambda( lambda x: x[0]+(x[1]-K.mean(x[1])) )( [value, advantage] )
         policy = Lambda( lambda x: x[0]*x[1] )( [policy, actionsIn] )
 
         model = Model(inputs=[startStates, actionsIn], outputs=policy)
-        model.compile(Adam( learning_rate=.0001 ), loss="huber_loss")
+        model.compile(Adam( learning_rate=.00025 ), loss="huber_loss")
         return model
 
 class ActorAgent(Agent):
-    def __init__(self, game, memPolicy, learnerChan, actorID, oracleScore, render, enableGPU=False):
+    def __init__(self, game, memPolicy, weightsChan, actorID, totalActors, oracleScore, 
+                 actionSpace=DEFAULT_ACTION_SPACE, render=False, enableGPU=False):
+        super().__init__(actionSpace)
         if enableGPU:
             os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         else:
@@ -49,32 +57,32 @@ class ActorAgent(Agent):
         self.policy = self._createPolicy()
         self.game = game
         self.memPolicy = memPolicy
-        self.learnerChan = learnerChan
+        self.weightsChan = weightsChan
         self.actorID = actorID
+        self.totalActors = totalActors
         self.render = render
         self.oracleScore = oracleScore
 
     def explore(self):
 
         bestScore = float("-inf")
-        noiseLevel = .05
         maxEpisodeTime = 30*60 # minutes*seconds
+        noiseLevel = .4**(1 + 8*(self.actorID/(self.totalActors-1)))
 
         while True:
 
             done = False
             s0 = self.game.reset() 
-            noops = np.random.choice( 32 )
             episodeStartTime = time.time()
+            info = {"life_lost":True}
 
             while not done:
                 if time.time()-episodeStartTime >= maxEpisodeTime:
                     break
 
                 # choose action
-                if noops > 0:
-                    a = 0
-                    noops -= 1
+                if info["life_lost"]:
+                    a = 1
                 elif np.random.random() <= noiseLevel:
                     a = np.random.choice( self.actionSpace )
                 else:
@@ -88,13 +96,12 @@ class ActorAgent(Agent):
                 self.memPolicy.append( (s0, s1, a, r, info["life_lost"]) )
 
                 # step upkeep
-                self._updateWeights()
                 s0 = s1
+                self._updateWeights()
 
                 # render
                 if self.render:
                     self.game.render()
-
 
             # record game score, if better than best so far
             if self.game.getScore() > bestScore:
@@ -108,15 +115,13 @@ class ActorAgent(Agent):
 
 
     def _updateWeights(self):
-        update = False
-        weightsPolicy = None
-        while not self.learnerChan.empty():
-            weights = self.learnerChan.get()
-            weightsPolicy = weights
-        if weightsPolicy is not None:
-            self.policy.set_weights( weightsPolicy )
-            update = True
-        return update
+        try:
+            # retrieve weights (if available) from chan
+            weights = self.weightsChan.get_nowait()
+            # set policy weights
+            self.policy.set_weights( weights )
+        except:
+            pass
 
     def predictPolicy(self, state):
         state = np.array( [state] )
@@ -126,16 +131,17 @@ class ActorAgent(Agent):
 
 
 class LearnerAgent(Agent):
-    def __init__(self, memory, agentName, actorsChan,
-                 load, saveFreq, 
-                 actorUpdateFreq, sampleSize,
-                 enableGPU):
+    def __init__(self, memory, agentName, weightsChan,
+                 load, saveFreq, sampleSize,
+                 actionSpace, enableGPU):
+        super().__init__(actionSpace)
         if enableGPU:
             os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         else:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
         self.model = self._createPolicy()
+        self.model.summary()
         self.load = load
         if load is not None:
             temp = loadModel(load)
@@ -144,27 +150,31 @@ class LearnerAgent(Agent):
         self.name = agentName + ".h5"
         self.memory = memory
 
-        self.actorUpdateFreq = actorUpdateFreq
-        self.actorsChan = actorsChan
+        self.weightsChan = weightsChan
         self.sampleSize = sampleSize
         self.saveFreq = saveFreq
 
     def save(self):
         print("Saving model:", self.name)
         self.model.save( self.name )
-    def _updateActors(self):
-        for chan in self.actorsChan:
-            chan.put(self.model.get_weights())
+    def _sendWeights(self):
+        # send fresh weights in weights chan
+        try:
+            self.weightsChan.put_nowait( self.model.get_weights() )
+        except:
+            pass
 
 
 class LearnerAgentPolicy(LearnerAgent):
-    def __init__(self, memory, agentName, actorsChan,
-                 load, saveFreq=2000, actorUpdateFreq=4, sampleSize=64, enableGPU=False,  
-                 gamma=0.997, targetUpdateFreq=1500):
-        super().__init__(memory, agentName, actorsChan,
-                 load, saveFreq, actorUpdateFreq, sampleSize, enableGPU)
-
+    def __init__(self, memory, agentName, weightsChan,
+                 load, saveFreq=2048, sampleSize=64, 
+                 actionSpace=DEFAULT_ACTION_SPACE,
+                 enableGPU=False, gamma=0.99, targetUpdateFreq=1500, memLoadFreq=4):
+        super().__init__(memory, agentName, weightsChan,
+                         load, saveFreq, 
+                         sampleSize, actionSpace, enableGPU)
         self.gamma = gamma
+        self.memLoadFreq = memLoadFreq
         self.targetUpdateFreq = targetUpdateFreq
         self.targetNet = clone_model(self.model)
         self._updateTarget()
@@ -172,17 +182,18 @@ class LearnerAgentPolicy(LearnerAgent):
     def learn(self):
         learnIter = 0
         while True:
-            self.memory.load()
+            if learnIter % self.memLoadFreq == 0:
+                self.memory.load()
             if len(self.memory) < self.sampleSize:
                 continue
+            #print("Learn iter:", learnIter)
 
             self.learnPolicy()
+            self._sendWeights()
 
             learnIter += 1
             if learnIter % self.targetUpdateFreq == 0 or (learnIter < self.targetUpdateFreq and self.load is None):
                 self._updateTarget()
-            if learnIter % self.actorUpdateFreq == 0:
-                self._updateActors()
             if learnIter % self.saveFreq == 0:
                 self.save()
 
@@ -199,12 +210,17 @@ class LearnerAgentPolicy(LearnerAgent):
         futureQ = self.targetNet.predict( [nextStates, actionsMask] )
         # set what Q should be, for given actions
         targetQ = np.zeros(actions.shape)
-        #targetQ[actions] = rewards + (1-isTerminal)*self.gamma*np.max(futureQ, axis=1)
-                                                                    # soft Q-learning (maximizing entropy)
+
+        targetQ[actions] = rewards + (1-isTerminal)*self.gamma*np.max(futureQ, axis=1)
+        ### soft Q-learning (maximizing entropy) *experiment
+        """
         targetQ[actions] = rewards + (1-isTerminal)*self.gamma*np.log(np.trapz(np.exp(futureQ)))
+        """
+
         # so if we start in these states, the rewards should look like this
         self.model.fit([startStates, actions], targetQ, sample_weight=isWeights, verbose=0)
 
+        # update memory priorities with temporal difference error
         tdError = abs( np.max(targetQ, axis=1) - np.max(onlineQ, axis=1) )
         self.memory.updatePriorities(indices, tdError)           
 

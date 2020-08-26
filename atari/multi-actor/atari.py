@@ -16,7 +16,7 @@ class Atari:
         # grayscale
         frame = np.mean(frame, axis=2)
         # down sample
-        frame = cv2.resize(frame, (84, 84), interpolation=cv2.INTER_CUBIC)
+        frame = cv2.resize(frame, (84, 84))
         return frame.astype(np.uint8)
 
     def _getState(self):
@@ -39,6 +39,7 @@ class Atari:
         if None in [self.lives, self.framesAfterDeath, self.score, self.episode]:
             raise RuntimeError("step called before reset")
 
+        # noop if action is not available in game
         if action >= self.env.action_space.n: 
             action = 0
         obs, reward, done, info = self.env.step(action)

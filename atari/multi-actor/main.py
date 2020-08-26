@@ -6,35 +6,28 @@ from agent import LearnerAgentPolicy, ActorAgent
 from memory import PolicyReplayMemory, ActorReplayMemory
 # do not import tensorflow here, as it will break the multiprocessing library
 
-def train(game, agentName, loadPolicy, cpuCount, memSizePolicy, actorThreshPolicy, render, enableLearnerGPU):
-    processes = []
-    weightChans = []
-    expChansPolicy = []
-    oracleScore = multiprocessing.Value("i", 0)
+def train(game, agentName, loadPolicy, cpuCount, memSizePolicy, expChanCap, render, actionSpace, enableLearnerGPU):
+
+    # each actor gets access to a central shared best score tracker
+    oracleScore = multiprocessing.Value( "i", 0 )
+    # each actor gets access to the experience queue
+    expChanPolicy = multiprocessing.Queue( expChanCap )
+    # each actor gets access to a fresh weights queue
+    weightsChan = multiprocessing.Queue( 1 )
 
     for actorID in range( cpuCount ):
-
-        expChanPolicy = multiprocessing.Queue( actorThreshPolicy*cpuCount )
-        expChansPolicy.append(expChanPolicy)
-
-        weightsChan = multiprocessing.Queue()
-        weightChans.append(weightsChan)
-
-        actorMemPolicy = ActorReplayMemory(expChanPolicy, thresh=actorThreshPolicy)
-
-        actor = ActorAgent(game, actorMemPolicy, weightsChan, actorID, oracleScore, 
-                           actorID == 0 and render)
+        actorMemPolicy = ActorReplayMemory(expChanPolicy)
+        actor = ActorAgent(game, actorMemPolicy, weightsChan, actorID, cpuCount, oracleScore, 
+                           render=(actorID == (cpuCount-1) and render), actionSpace=actionSpace)
 
         proc = multiprocessing.Process(target=actor.explore)
-        processes.append(proc)
-
-        print("Actor", actorID, "created")
-
-    for proc in processes:
+        # start actor process upon creation
         proc.start()
 
-    learnerMemPolicy = PolicyReplayMemory(expChansPolicy, size=memSizePolicy)
-    learner = LearnerAgentPolicy(learnerMemPolicy, agentName, weightChans, loadPolicy, enableGPU=enableLearnerGPU)
+        print("Actor", actorID, "started")
+
+    learnerMemPolicy = PolicyReplayMemory(expChanPolicy, size=memSizePolicy)
+    learner = LearnerAgentPolicy(learnerMemPolicy, agentName, weightsChan, loadPolicy, actionSpace=actionSpace, enableGPU=enableLearnerGPU)
     learner.learn()
 
 def main():
@@ -54,6 +47,7 @@ def main():
             ]
     option = 0
     game = Atari( games[option]+"Deterministic-v4" )
+    actionSpace = game.getActionSpace()
     print(game.env.unwrapped.get_action_meanings())
     agentName = "atari_agent_" + games[option]
 
@@ -62,14 +56,20 @@ def main():
     #load = "models/atari_agent_" + games[option] + "_best.h5"
     #load = "atari_agent_" + games[option] + ".h5"
 
-    cpuCount = os.cpu_count() - 2
-
-    actorThreshPolicy = 2**8
-    memSizePolicy = 2**18
-
     render = True
     enableLearnerGPU = True
-    train(game, agentName, loadPolicy, cpuCount, memSizePolicy, actorThreshPolicy, render, enableLearnerGPU)
+    cpuCount = os.cpu_count()
+
+    # accounts for majority of the memory used by program
+    memSizePolicy = 2**18
+    """
+    Syncronizes transfer of experiences between learner and actors.
+    Note a tradeoff that occurs: if higher, then actors will be faster
+    and learner will be slower (and vice versa).
+    """
+    expChanCap = 256
+
+    train(game, agentName, loadPolicy, cpuCount, memSizePolicy, expChanCap, render, actionSpace, enableLearnerGPU)
 
 
 if __name__ == "__main__":
