@@ -14,16 +14,8 @@ class RingBuffer:
         if self.end == self.start:
             self.start = (self.start + 1) % len(self.data)
 
-    def max(self):
-        return max( [v for v in self] )
-    def min(self):
-        return min( [v for v in self] )
-    def sum(self):
-        return sum( [v for v in self] )
-    def std(self):
-        return np.array([v for v in self]).std()
-    def mean(self):
-        return np.array([v for v in self]).mean()
+    def getData(self):
+        return np.array( [v for v in self] )
 
     def sample(self, k):
         if k > len(self):
@@ -109,6 +101,12 @@ class PriorityReplayMemory:
             priority = self.maxPriority
         self.tree.add(priority, exp) 
 
+    def newPrioritizedLeaf(self, exp, priority):
+        priority += self.e
+        priority = min(priority, self.maxPriority)
+        priority = priority**self.alpha
+        self.tree.add(priority, exp) 
+
     def _annealBeta(self):
         self.beta = min(1.0, self.beta+self.betaAnneal ) 
 
@@ -129,11 +127,17 @@ class PriorityReplayMemory:
             p += delta_p
 
         probabilities = priorities / self.tree.total_priority
-        isWeights = np.power(self.tree.n_entries * probabilities, -self.beta)
+        isWeights = np.ones(probabilities.shape)
+        np.power(self.tree.n_entries * probabilities, -self.beta, out=isWeights)
         isWeights /= isWeights.max()
         self._annealBeta()
 
         return data, treeIndices, isWeights
+
+    def uniform_sample(self, n):
+        if n > self.tree.n_entries:
+            n = self.tree.n_entries
+        return random.sample( self.tree.data[0:self.tree.n_entries], n )
 
     def batchUpdate(self, treeIdx, errors):
         errors += self.e

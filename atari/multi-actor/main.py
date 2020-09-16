@@ -1,23 +1,22 @@
-import gym, time, multiprocessing, os
+import gym, time, multiprocessing, threading, os
 import numpy as np
 from matplotlib import pyplot as plt
 from atari import Atari
-from agent import LearnerAgentPolicy, ActorAgent
-from memory import PolicyReplayMemory, ActorReplayMemory
+from agent import LearnerAgentPolicy, LearnerAgentRND, LearnerAgentEmbedding, ActorAgent
+from memory import ExperienceReplayMemory
 # do not import tensorflow here, as it will break the multiprocessing library
 
-def train(game, agentName, loadPolicy, cpuCount, memSizePolicy, expChanCap, render, actionSpace, enableLearnerGPU):
+def train(game, agentName, loadPolicy, loadRND, loadEmbedding, cpuCount, replayMemSize, expChanCap, render, actionSpace, enableLearnerGPU):
 
     # each actor gets access to a central shared best score tracker
     oracleScore = multiprocessing.Value( "i", 0 )
     # each actor gets access to the experience queue
-    expChanPolicy = multiprocessing.Queue( expChanCap )
+    expChan = multiprocessing.Queue( expChanCap )
     # each actor gets access to a fresh weights queue
     weightsChan = multiprocessing.Queue( 1 )
 
     for actorID in range( cpuCount ):
-        actorMemPolicy = ActorReplayMemory(expChanPolicy)
-        actor = ActorAgent(game, actorMemPolicy, weightsChan, actorID, cpuCount, oracleScore, 
+        actor = ActorAgent(game, expChan, weightsChan, actorID, cpuCount, oracleScore, 
                            render=(actorID == (cpuCount-1) and render), actionSpace=actionSpace)
 
         proc = multiprocessing.Process(target=actor.explore)
@@ -26,9 +25,27 @@ def train(game, agentName, loadPolicy, cpuCount, memSizePolicy, expChanCap, rend
 
         print("Actor", actorID, "started")
 
-    learnerMemPolicy = PolicyReplayMemory(expChanPolicy, size=memSizePolicy)
-    learner = LearnerAgentPolicy(learnerMemPolicy, agentName, weightsChan, loadPolicy, actionSpace=actionSpace, enableGPU=enableLearnerGPU)
-    learner.learn()
+    # create and start loading memory from actors (policy)
+    learnerMemory = ExperienceReplayMemory(expChan, size=replayMemSize)
+    memLoadThread = threading.Thread(target=learnerMemory.load_nolock)
+    memLoadThread.start()
+
+    learnerPolicy = LearnerAgentPolicy(learnerMemory, agentName, weightsChan, load=loadPolicy, actionSpace=actionSpace, enableGPU=enableLearnerGPU)
+    learnerEmbedding = LearnerAgentEmbedding(learnerMemory, agentName, weightsChan, load=loadEmbedding, actionSpace=actionSpace, enableGPU=enableLearnerGPU)
+    learnerRND = LearnerAgentRND(learnerMemory, agentName, weightsChan, load=loadRND, actionSpace=actionSpace, enableGPU=enableLearnerGPU)
+
+    # start policy learner
+    threadPolicy = threading.Thread(target=learnerPolicy.learn)
+    threadPolicy.start()
+    # start embedding learner
+    threadEmbedding = threading.Thread(target=learnerEmbedding.learn)
+    threadEmbedding.start()
+    # start rnd learner
+    threadRND = threading.Thread(target=learnerRND.learn)
+    threadRND.start()
+
+    # join with policy learner
+    threadPolicy.join()
 
 def main():
     games = [
@@ -45,31 +62,33 @@ def main():
 
              "Enduro", # 9
             ]
-    option = 0
+    option = 5
     game = Atari( games[option]+"Deterministic-v4" )
+    #game = Atari( games[option]+"Deterministic-v0" )
     actionSpace = game.getActionSpace()
     print(game.env.unwrapped.get_action_meanings())
     agentName = "atari_agent_" + games[option]
 
     # set to None if no model to load
     loadPolicy = None
-    #load = "models/atari_agent_" + games[option] + "_best.h5"
-    #load = "atari_agent_" + games[option] + ".h5"
+    #loadPolicy = "models/atari_agent_" + games[option] + "_best.h5"
+    #loadPolicy = "atari_agent_" + games[option] + "_policy.h5"
+    loadRND = None
+    #loadRND = "models/atari_agent_" + games[option] + "_rnd_best.h5"
+    #loadRND = "atari_agent_" + games[option] + "_rnd.h5"
+    loadEmbedding = None
+    #loadEmbedding = "models/atari_agent_" + games[option] + "_embedding_best.h5"
+    #loadEmbedding = "atari_agent_" + games[option] + "_embedding.h5"
 
     render = True
     enableLearnerGPU = True
     cpuCount = os.cpu_count()
-
     # accounts for majority of the memory used by program
-    memSizePolicy = 2**18
-    """
-    Syncronizes transfer of experiences between learner and actors.
-    Note a tradeoff that occurs: if higher, then actors will be faster
-    and learner will be slower (and vice versa).
-    """
+    replayMemSize = 2**17
+    # simply ensures that the experience chan doesn't keep growing infinitely
     expChanCap = 256
 
-    train(game, agentName, loadPolicy, cpuCount, memSizePolicy, expChanCap, render, actionSpace, enableLearnerGPU)
+    train(game, agentName, loadPolicy, loadRND, loadEmbedding, cpuCount, replayMemSize, expChanCap, render, actionSpace, enableLearnerGPU)
 
 
 if __name__ == "__main__":

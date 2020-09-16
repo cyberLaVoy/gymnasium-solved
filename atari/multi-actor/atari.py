@@ -26,10 +26,12 @@ class Atari:
         frame = self.env.reset() 
         self.episode = RingBuffer(512)
         self.episode.append(frame)
-        frame = self._processFrame( frame )
-        self.state = RingBuffer(4)
-        for _ in range(4):
-            self.state.append(frame)
+        # only seed state buffer with start frame initially
+        if self.state is None:
+            frame = self._processFrame( frame )
+            self.state = RingBuffer(4)
+            for _ in range(4):
+                self.state.append(frame)
         self.lives = self.env.ale.lives()
         self.framesAfterDeath = 0
         self.score = 0
