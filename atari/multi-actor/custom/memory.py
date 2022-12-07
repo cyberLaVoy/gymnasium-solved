@@ -17,6 +17,17 @@ class RingBuffer:
     def getData(self):
         return np.array( [v for v in self] )
 
+    def max(self):
+        return max( [v for v in self] )
+    def min(self):
+        return min( [v for v in self] )
+    def sum(self):
+        return sum( [v for v in self] )
+    def std(self):
+        return np.array([v for v in self]).std()
+    def mean(self):
+        return np.array([v for v in self]).mean()
+
     def sample(self, k):
         if k > len(self):
             k = len(self)

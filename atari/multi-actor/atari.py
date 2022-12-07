@@ -22,6 +22,11 @@ class Atari:
     def _getState(self):
         return np.dstack( [self.state[i] for i in range(4)] )
 
+    def getStateChange(self):
+        change = self.state[3]-self.state[2]
+        change = np.where(change > 0, 1, 0)
+        return np.reshape( change, (84,84,1) ).astype(np.uint8)
+
     def reset(self):
         frame = self.env.reset() 
         self.episode = RingBuffer(512)
