@@ -1,6 +1,4 @@
-import gym, time, multiprocessing, threading, os
-import numpy as np
-from matplotlib import pyplot as plt
+import multiprocessing, threading, os
 from atari import Atari
 from agent import LearnerAgentPolicy, LearnerAgentRND, LearnerAgentEmbedding, ActorAgent
 from memory import ExperienceReplayMemory
@@ -48,26 +46,75 @@ def train(game, agentName, loadPolicy, loadRND, loadEmbedding, cpuCount, replayM
     threadPolicy.join()
 
 def main():
+    # A list of all possible Atari games
     games = [
-             "Breakout", # 0
-             "Pong", # 1
-             "MsPacman", # 2
-             "SpaceInvaders", # 3
-             "Asteroids", # 4
-
-             "MontezumaRevenge", # 5
-             "Skiing", # 6
-             "Pitfall", # 7
-             "Solaris", # 8
-
-             "Enduro", # 9
-            ]
-    option = 5
+        "Adventure", # 0
+        "AirRaid", # 1
+        "Alien", # 2
+        "Amidar", # 3
+        "Assault", # 4
+        "Asterix", # 5
+        "Asteroids", # 6
+        "Atlantis", # 7
+        "BankHeist", # 8
+        "BattleZone", # 9
+        "BeamRider", # 10
+        "Berzerk", # 11
+        "Bowling", # 12
+        "Boxing", # 13
+        "Breakout", # 14
+        "Carnival", # 15
+        "Centipede", # 16
+        "ChopperCommand", # 17
+        "CrazyClimber", # 18
+        "Defender", # 19
+        "DemonAttack", # 20
+        "DoubleDunk", # 21
+        "ElevatorAction", # 22
+        "Enduro", # 23
+        "FishingDerby", # 24
+        "Freeway", # 25
+        "Frostbite", # 26
+        "Gopher", # 27
+        "Gravitar", # 28
+        "Hero", # 29
+        "IceHockey", # 30
+        "Jamesbond", # 31
+        "JourneyEscape", # 32
+        "Kangaroo", # 33
+        "Krull", # 34
+        "KungFuMaster", # 35
+        "MontezumaRevenge", # 36
+        "MsPacman", # 37
+        "NameThisGame", # 38
+        "Phoenix", # 39
+        "Pitfall", # 40
+        "Pong", # 41
+        "Pooyan", # 42
+        "PrivateEye", # 43
+        "Qbert", # 44
+        "Riverraid", # 45
+        "RoadRunner", # 46
+        "RobotTank", # 47
+        "Seaquest", # 48
+        "Skiings", # 49
+        "Solaris", # 50
+        "SpaceInvaders", # 51
+        "StarGunner", # 52
+        "Tennis", # 53
+        "TimePilot", # 54
+        "Tutankham", # 55
+        "UpNDown", # 56
+        "Venture", # 57
+        "VideoPinball", # 58
+        "WizardofWor", # 59
+        "Zaxxon" # 60
+    ]
+    option = 14
     game = Atari( games[option]+"Deterministic-v4" )
-    #game = Atari( games[option]+"Deterministic-v0" )
-    actionSpace = game.getActionSpace()
-    print(game.env.unwrapped.get_action_meanings())
     agentName = "atari_agent_" + games[option]
+
+    actionSpace = game.getActionSpace()
 
     # set to None if no model to load
     loadPolicy = None
