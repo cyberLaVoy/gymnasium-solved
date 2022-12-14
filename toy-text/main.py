@@ -4,10 +4,31 @@ import joblib
 import numpy as np 
 
 
+def observationAsIndex(observation):
+    observationIndex = 0
+    if isinstance(observation, tuple):
+        for obs in observation:
+            observationIndex += obs
+    else:
+        observationIndex = observation
+    return observationIndex
+
+def observationSpaceSize(observationSpace):
+    observationSpaceSize = 0
+    if isinstance(observationSpace, gym.spaces.Tuple):
+        for obs in observationSpace:
+            observationSpaceSize += obs.n
+    else:
+        observationSpaceSize = observationSpace.n
+    return observationSpaceSize
+
+
 def saveModel(model, modelPath):
     joblib.dump(model, modelPath) 
+
 def loadModel(modelPath):
     return joblib.load(modelPath)
+
 
 def learnQTable(env, Q, alpha=.65, gamma=.9, epochs=100000):
     """
@@ -27,6 +48,7 @@ def learnQTable(env, Q, alpha=.65, gamma=.9, epochs=100000):
     for episode in range(epochs):
         # Reset the environment and get the initial state
         currentState, _ = env.reset()
+        currentState = observationAsIndex( currentState )
         # Set flags for whether the episode has terminated or been truncated
         terminated = False
         truncated = False
@@ -36,6 +58,7 @@ def learnQTable(env, Q, alpha=.65, gamma=.9, epochs=100000):
             action = np.argmax(trainedQ[currentState,:] + np.random.randn(1,env.action_space.n)*(1/(episode+1))) 
             # Take the action and get the new state and reward
             newState,reward,terminated,truncated, _ = env.step(action)
+            newState = observationAsIndex( newState )
             # Update Q-Table with new knowledge
             trainedQ[currentState, action] = (1-alpha)*trainedQ[currentState, action] + alpha*(reward + gamma*np.max(trainedQ[newState,:]))
             # Set the current state to the new state
@@ -46,11 +69,13 @@ def learnQTable(env, Q, alpha=.65, gamma=.9, epochs=100000):
 def evaluateQTable(env, Q, numTests):
     for _ in range(numTests):
         observation, _ = env.reset()
+        observation = observationAsIndex( observation )
         terminated = False
         truncated = False
         while not (terminated or truncated):
             action = np.argmax(Q[observation,:])
             observation,_,terminated,truncated, _ = env.step(action)
+            observation = observationAsIndex( observation )
 
 def main():
     # Game options
@@ -58,11 +83,11 @@ def main():
         "CliffWalking-v0", # 0
         "FrozenLake-v1", # 1
         "Taxi-v3", # 2
-        #"Blackjack-v1", # 3
+        "Blackjack-v1", # 3
     ]
 
     # Choose the game
-    gameChoice = games[2]
+    gameChoice = games[1]
     QTableName = gameChoice + "_Q-table"
 
     # Choose operations
@@ -71,7 +96,7 @@ def main():
 
     if learnAndSave:
         env = gym.make(gameChoice)
-        Q = np.zeros( [ env.observation_space.n, env.action_space.n ] )
+        Q = np.zeros( [ observationSpaceSize(env.observation_space), env.action_space.n ] )
         learnedQ = learnQTable(env, Q)
         saveModel(learnedQ, QTableName+".joblib")
 
