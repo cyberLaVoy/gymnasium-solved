@@ -55,7 +55,8 @@ def learnQTable(env, Q, alpha=.65, gamma=.9, epochs=100000):
         # Run the Q-learning algorithm for this episode
         while not (terminated or truncated):
             # Choose an action using the Q-table, with a decreasing influence of randomness
-            action = np.argmax(trainedQ[currentState,:] + np.random.randn(1,env.action_space.n)*(1/(episode+1))) 
+            randScalar = 1/(episode+1)
+            action = np.argmax(trainedQ[currentState,:] + randScalar*np.random.randn(1, env.action_space.n)) 
             # Take the action and get the new state and reward
             newState,reward,terminated,truncated, _ = env.step(action)
             newState = observationAsIndex( newState )
@@ -87,7 +88,7 @@ def main():
     ]
 
     # Choose the game
-    gameChoice = games[1]
+    gameChoice = games[2]
     QTableName = gameChoice + "_Q-table"
 
     # Choose operations
