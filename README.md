@@ -1,6 +1,6 @@
-# openai-gym
+# Gymnasium Solved
 
-Welcome to my personal project on reinforcement learning! This repository contains solutions to OpenAI's Gym problems using deep reinforcement learning and Q-learning algorithms.
+Welcome to my personal project on reinforcement learning! This repository contains solutions to the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) problem set, using deep reinforcement learning and Q-learning algorithms.
 
 The code in this repository is written in Python and includes both single-threaded and multi-threaded implementations. I created this project to learn about reinforcement learning and see its capabilities firsthand. With this repository, you can train your own agents and experiment with deep reinforcement learning and Q-learning on a variety of environments, including Atari games, classic-control, and toy-text.
 
