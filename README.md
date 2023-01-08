@@ -10,7 +10,46 @@ The code in this repository is written in Python and includes both single-thread
 - Use the code as a starting point for your own reinforcement learning projects
 
 ## Setup
-The setup process to run the code in this repository is currently complex and the documentation is not ready. But don't worry, setup documentation will be coming soon!
+
+### Hardware and Drivers
+
+1. Nvidia GPU with CUDA cores
+2. Graphics driver
+3. CUDA
+4. cuDNN
+
+The best way to obtain 2, 3, and 4 is to simply follow the instructions provided by Nvidia.
+
+[Graphics driver](https://www.nvidia.com/download/index.aspx)
+
+[CUDA](https://developer.nvidia.com/cuda-downloads)
+
+[cuDNN](https://docs.nvidia.com/deeplearning/cudnn/install-guide/index.html)
+
+
+To verify installs and check versions run:
+
+```
+nvidia-smi
+```
+
+For algorithms using neural networks, install Tensorflow GPU.
+
+```bash
+pip install tensorflow-gpu
+```
+
+Install Gymnasium.
+
+```bash
+pip install gymnasium gymnasium[atari] gymnasium[accept-rom-license]
+```
+
+Install additional Python library requirements.
+
+```bash
+pip install opencv-python numpy matplotlib joblib
+```
 
 ## Contributing
 I welcome contributions to this repository! If you have any feedback, suggestions, or ideas for improvements, please feel free to open an issue or submit a pull request.

@@ -1,4 +1,5 @@
-import gym, random, cv2
+import random, cv2
+import gymnasium as gym
 import numpy as np
 
 class Atari:
@@ -48,6 +49,7 @@ class Atari:
     
     def _processFrame(self, frame):
         # grayscale
+        print(frame)
         frame = np.mean(frame, axis=2).astype(np.uint8)
         # down sample
         frame =cv2.resize(frame, (84, 84))
