@@ -1,14 +1,12 @@
 import numpy as np
-import tensorflow as tf
-import os, random
 import cv2
 from matplotlib import pyplot as plt
-from tensorflow.keras import backend as K
-from tensorflow.keras.models import Model, load_model, clone_model
-import tensorflow.keras.initializers as initializers
-from tensorflow.keras.initializers import VarianceScaling
-from tensorflow.keras.layers import Dense, Conv2D, Flatten, Input, Lambda, multiply, Layer, AveragePooling2D
-from tensorflow.keras.optimizers import Adam
+from keras import backend as K
+from keras.models import Model, load_model, clone_model
+import keras.initializers as initializers
+from keras.initializers import VarianceScaling
+from keras.layers import Dense, Conv2D, Flatten, Input, Lambda, Layer
+from keras.optimizers import Adam
 
 def loadModel(fileName):
     # any further custom objects must be added to custom_object
@@ -84,7 +82,7 @@ class Agent:
     def predict(self, state):
         state = np.array( [state] )
         mask = np.ones( (1, self.numActions) )
-        return self.model.predict( [state, mask] )
+        return self.model.predict( [state, mask], verbose=0 )
 
     def getAction(self, state):
         return np.argmax( self.predict(state) ) 
@@ -100,7 +98,7 @@ class Agent:
         actions = self._getActionsMask(actions)
 
         # unused if DDQN and PER are both disabled
-        onlineQvalues = self.model.predict( [nextStates, np.ones(actions.shape)] )
+        onlineQvalues = self.model.predict( [nextStates, np.ones(actions.shape)], verbose=0 )
         if self.double:
             ### double achitecture, where we predict actions with online model
             predActions = np.argmax(onlineQvalues, axis=1)
@@ -109,7 +107,7 @@ class Agent:
             actionsMask = np.ones(actions.shape)
 
         # predict Q values from actions mask
-        futureQ = self.targetNet.predict( [nextStates, actionsMask] )
+        futureQ = self.targetNet.predict( [nextStates, actionsMask], verbose=0 )
         futureQ = np.max(futureQ, axis=1)
         # set what Q values should be, for given actions
         targetQ = np.zeros(actions.shape)
@@ -145,7 +143,7 @@ class Agent:
         if self.attentionView:
             state = np.array( [state] )
             mask = np.ones( (1, self.numActions) )
-            activations = self.attention.predict( [state, mask] )
+            activations = self.attention.predict( [state, mask], verbose=0 )
 
             stack = []
             for activ in activations:

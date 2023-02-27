@@ -163,27 +163,27 @@ def main():
     game = Atari( games[option]+"Deterministic-v4" )
     agentName = "atari_agent_" + games[option]
 
-    # set to None if no model to load
-    load = None
-    #load = "atari_agent_breakout_best.h5"
-    #load = "atari_agent_pong_best.h5"
-    #load = "atari_agent_ms_pacman_best.h5"
-    #load = "atari_agent_space_invaders.h5"
+    # set to None if no model to pretainedModel
+    pretainedModel = None
+    #pretainedModel = "atari_agent_breakout_best.h5"
+    #pretainedModel = "atari_agent_pong_best.h5"
+    #pretainedModel = "atari_agent_ms_pacman_best.h5"
+    #pretainedModel = "atari_agent_space_invaders.h5"
 
     trainAndSave = True
     testAndObserve = False
 
-    render = True
+    render = False
     attention = True
 
     if trainAndSave:
-        agent = Agent(agentName, game.getActionSpace(), modelLoad=load, attentionView=attention)
+        agent = Agent(agentName, game.getActionSpace(), modelLoad=pretainedModel, attentionView=attention)
         memory = ReplayMemory(game.reset(), game.getActionSpace(), prioritized=True)
-        if load is None:
+        if pretainedModel is None:
             buildMemory(game, memory, 2**12)
         train(game, agent, memory, episodes=50000, render=render)
     if testAndObserve:
-        agent = Agent(agentName, game.getActionSpace(), modelLoad=load)
+        agent = Agent(agentName, game.getActionSpace(), modelLoad=pretainedModel)
         testAgent(game, agent, 100, render=True)
 
 

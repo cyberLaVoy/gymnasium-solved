@@ -13,7 +13,7 @@ class Atari:
         random.seed( seed )
 
     def reset(self):
-        frame = self.env.reset() 
+        frame, _ = self.env.reset() 
         self.lives = self.env.ale.lives()
         self.framesAfterDeath = 0
         self.score = 0
@@ -24,7 +24,8 @@ class Atari:
         if None in [self.lives, self.framesAfterDeath, self.score, self.episode]:
             raise RuntimeError("step called before reset")
 
-        state, reward, done, info = self.env.step(action)
+        state, reward, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
         self.score += reward
 
         self.episode.append(state)
@@ -34,22 +35,21 @@ class Atari:
         self.framesAfterDeath += 1
         info["life_lost"] = False
         # but if a life has been lost
-        if info["ale.lives"] < self.lives:
+        if info["lives"] < self.lives:
             # update lives count, and frames after death
-            self.lives = info["ale.lives"]
+            self.lives = info["lives"]
             self.framesAfterDeath = 0
             info["life_lost"] = True
         # but if lives have been reset
-        if info["ale.lives"] > self.lives:
+        if info["lives"] > self.lives:
             # update lives count, and frames after death
-            self.lives = info["ale.lives"]
+            self.lives = info["lives"]
             self.framesAfterDeath = 0
 
         return state, np.sign(reward), done, info
     
     def _processFrame(self, frame):
         # grayscale
-        print(frame)
         frame = np.mean(frame, axis=2).astype(np.uint8)
         # down sample
         frame =cv2.resize(frame, (84, 84))
