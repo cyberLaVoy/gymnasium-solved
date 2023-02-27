@@ -2,11 +2,10 @@ import numpy as np
 import os, time
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 
-import tensorflow as tf
-from tensorflow.keras import backend as K
-from tensorflow.keras.models import Model, clone_model
-from tensorflow.keras.layers import Dense, Conv2D, Flatten, Input, Lambda, LeakyReLU, Concatenate
-from tensorflow.keras.optimizers import Adam
+from keras import backend as K
+from keras.models import Model, clone_model
+from keras.layers import Dense, Conv2D, Flatten, Input, Lambda, Concatenate
+from keras.optimizers import Adam
 
 from custom.layers import Noise, Whiteout, loadModel
 from custom.utils import displayFrames, displayMetric 
@@ -228,12 +227,12 @@ class ActorAgent(Agent):
     def predictPolicy(self, state):
         state = np.array( [state] )
         mask = np.ones( (1, self.actionSpace) )
-        return self.netPolicy.predict( [state, mask] )
+        return self.netPolicy.predict( [state, mask], verbose=0 )
     
     def predictEmbedding(self, startState, nextState):
         startState = np.array( [startState] )
         nextState = np.array( [nextState] )
-        return self.netEmbedding.predict( [startState, nextState] )
+        return self.netEmbedding.predict( [startState, nextState], verbose=0 )
 
     def calculateEpisodicReward(self, episodicMemory, embedding):
         if len(episodicMemory) < self.kNeighbors:
@@ -253,7 +252,7 @@ class ActorAgent(Agent):
             return 1/similarity
 
     def calculateIntrinsicReward(self, state, r_episodic):
-        fixed, pred = self.netRND.predict( np.array([state]) )
+        fixed, pred = self.netRND.predict( np.array([state]), verbose=0 )
         novelty = np.sum( (pred-fixed)**2 )
         self.noveltyStats.update(novelty)
         modulator = 1 + (novelty - self.noveltyStats.mean) / (self.noveltyStats.std + 1e-8)
@@ -328,7 +327,7 @@ class LearnerAgentRND(LearnerAgent):
         while True:
             _, nextStates, _, _, _, _, _ = self.memory.uniform_sample(self.sampleSize) 
             nextStates = nextStates[:,:,:,3:]
-            fixed, _ = self.model.predict( nextStates )
+            fixed, _ = self.model.predict( nextStates, verbose=0 )
             self.model.fit(nextStates, [fixed, fixed], verbose=0)
 
             learnIter += 1
@@ -357,7 +356,7 @@ class LearnerAgentEmbedding(LearnerAgent):
             startStates = startStates[:,:,:,3:]
             nextStates = nextStates[:,:,:,3:]
             actions = self._getActionsMask(actions)
-            embedding, _ = self.model.predict([startStates, nextStates])
+            embedding, _ = self.model.predict([startStates, nextStates], verbose=0)
             self.model.fit([startStates, nextStates], [embedding, actions], verbose=0)
 
             learnIter += 1
@@ -392,9 +391,9 @@ class LearnerAgentPolicy(LearnerAgent):
             actions = self._getActionsMask(actions)
 
             # predict actions with online model, and Q from target model, from such actions (double achitecture)
-            onlineFutureQ_i, onlineFutureQ_e = self.model.predict( [nextStates, np.ones(actions.shape)] )
+            onlineFutureQ_i, onlineFutureQ_e = self.model.predict( [nextStates, np.ones(actions.shape)], verbose=0 )
             predictedActions = self._getActionsMask(np.argmax(onlineFutureQ_i+onlineFutureQ_e, axis=1))
-            futureQ_i, futureQ_e = self.modelTarget.predict( [nextStates, predictedActions] )
+            futureQ_i, futureQ_e = self.modelTarget.predict( [nextStates, predictedActions], verbose=0 )
 
             # set what Q should be, for given actions
             targetQ_i = np.zeros(actions.shape)

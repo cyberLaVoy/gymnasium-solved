@@ -6,7 +6,7 @@ The code in this repository is written in Python and includes both single-thread
 
 ## Features
 - Explore deep reinforcement learning and Q-learning algorithms and their performance on various environments
--  Train agents to solve complex Atari games using multi-threading
+- Train agents to solve complex Atari games using multi-threading
 - Use the code as a starting point for your own reinforcement learning projects
 
 ## Setup
@@ -18,25 +18,36 @@ The code in this repository is written in Python and includes both single-thread
 3. CUDA
 4. cuDNN
 
-The best way to obtain 2, 3, and 4 is to simply follow the instructions provided by Nvidia.
+The best way to obtain 2, 3, and 4 is to follow the instructions provided by Nvidia.
 
-[Graphics driver](https://www.nvidia.com/download/index.aspx)
+[Graphics driver (latest)](https://www.nvidia.com/download/index.aspx)
 
-[CUDA](https://developer.nvidia.com/cuda-downloads)
+Latest driver version should be compatible with older CUDA versions. Graphics drivers are supposed to be backwards compatible with CUDA versions.
 
-[cuDNN](https://docs.nvidia.com/deeplearning/cudnn/install-guide/index.html)
+[CUDA (latest)](https://developer.nvidia.com/cuda-downloads)
 
+[CUDA (versions)](https://developer.nvidia.com/cuda-toolkit-archive)
 
-To verify installs and check versions run:
+The CUDA version chosen seems to have a dependancy on OS version.
 
-```
+[cuDNN (guide)](https://docs.nvidia.com/deeplearning/cudnn/install-guide/index.html)
+
+[cuDNN (versions)](https://developer.nvidia.com/rdp/cudnn-archive)
+
+Make sure to install compatible version combinations for Tensorflow. 
+
+[Version compatibility chart](https://www.tensorflow.org/install/source#gpu)
+
+To verify install and check versions of graphics driver and CUDA run:
+
+```bash
 nvidia-smi
 ```
 
-For algorithms using neural networks, install Tensorflow GPU.
+Install Tensorflow.
 
 ```bash
-pip install tensorflow-gpu
+pip install tensorflow
 ```
 
 Install Gymnasium.

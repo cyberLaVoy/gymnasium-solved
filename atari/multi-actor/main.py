@@ -127,7 +127,7 @@ def main():
     #loadEmbedding = "models/atari_agent_" + games[option] + "_embedding_best.h5"
     #loadEmbedding = "atari_agent_" + games[option] + "_embedding.h5"
 
-    render = True
+    render = False # Currently broken, do not enable
     enableLearnerGPU = True
     cpuCount = os.cpu_count()
     # accounts for majority of the memory used by program

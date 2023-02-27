@@ -1,4 +1,5 @@
-import gym, cv2, psutil
+import cv2
+import gymnasium as gym
 import numpy as np
 from custom.memory import RingBuffer
 
@@ -28,7 +29,7 @@ class Atari:
         return np.reshape( change, (84,84,1) ).astype(np.uint8)
 
     def reset(self):
-        frame = self.env.reset() 
+        frame, _ = self.env.reset() 
         self.episode = RingBuffer(512)
         self.episode.append(frame)
         # only seed state buffer with start frame initially
@@ -49,7 +50,8 @@ class Atari:
         # noop if action is not available in game
         if action >= self.env.action_space.n: 
             action = 0
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
         self.score += reward
         self.episode.append(obs)
         self.state.append( self._processFrame(obs) )
@@ -58,15 +60,15 @@ class Atari:
         self.framesAfterDeath += 1
         info["life_lost"] = False
         # but if a life has been lost
-        if info["ale.lives"] < self.lives:
+        if info["lives"] < self.lives:
             # update lives count, and frames after death
-            self.lives = info["ale.lives"]
+            self.lives = info["lives"]
             self.framesAfterDeath = 0
             info["life_lost"] = True
         # but if lives have been reset
-        if info["ale.lives"] > self.lives:
+        if info["lives"] > self.lives:
             # update lives count, and frames after death
-            self.lives = info["ale.lives"]
+            self.lives = info["lives"]
             self.framesAfterDeath = 0
 
         return self._getState(), np.sign(reward), done, info
