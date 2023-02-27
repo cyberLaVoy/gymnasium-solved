@@ -21,7 +21,7 @@ def buildMemory(game, memory, amount):
             memory.append( (s, a, r, info["life_lost"]) )
         print("Memory:", str(len(memory)) + '/' + str(amount))
 
-def train(game, agent, memory, episodes=10000, render=False, epochSteps=50):
+def train(game, agent, memory, episodes=10000, epochSteps=50, renderAttention=False):
     act = 0
     epochReward = 0
     epochEsp = 1
@@ -47,8 +47,7 @@ def train(game, agent, memory, episodes=10000, render=False, epochSteps=50):
                 agent.learn( memory )
             # upkeep for next step 
             epsReward += r
-            if render:
-                game.render()
+            if renderAttention:
                 agent.viewAttention( memory.getState() )
 
         epochReward += epsReward
@@ -63,12 +62,10 @@ def train(game, agent, memory, episodes=10000, render=False, epochSteps=50):
         if eps % epochSteps == 0:
             epochReward = 0
             epochEsp = 1
-            testScore, actionCounts = testAgent(game, agent, 5, render)
-            print("Avg test score:", testScore, "Action counts:", actionCounts)
 
     game.close()
 
-def testAgent(game, agent, episodes, render=False):
+def testAgent(game, agent, episodes, renderAttention=False):
     epochScore = 0
     actionCounts = [0]*game.getActionSpace()
     memory = ReplayMemory(game.reset(), game.getActionSpace(), size=0, prioritized=False)
@@ -89,9 +86,10 @@ def testAgent(game, agent, episodes, render=False):
             memory.append( (s, a, r, info["life_lost"]) )
             # upkeep for next step
             episodeScore += r 
-            if render:
-                game.render()
+            if renderAttention:
+                agent.viewAttention( memory.getState() )
         epochScore += episodeScore 
+
     return epochScore/episodes, actionCounts
 
 def main():
@@ -160,31 +158,28 @@ def main():
         "Zaxxon" # 60
     ]
     option = 14
-    game = Atari( games[option]+"Deterministic-v4" )
     agentName = "atari_agent_" + games[option]
 
     # set to None if no model to pretainedModel
     pretainedModel = None
     #pretainedModel = "atari_agent_breakout_best.h5"
-    #pretainedModel = "atari_agent_pong_best.h5"
-    #pretainedModel = "atari_agent_ms_pacman_best.h5"
-    #pretainedModel = "atari_agent_space_invaders.h5"
 
     trainAndSave = True
     testAndObserve = False
 
-    render = False
-    attention = True
+    renderAttention = False
 
     if trainAndSave:
-        agent = Agent(agentName, game.getActionSpace(), modelLoad=pretainedModel, attentionView=attention)
+        game = Atari( games[option]+"Deterministic-v4" )
+        agent = Agent(agentName, game.getActionSpace(), modelLoad=pretainedModel, attentionView=renderAttention)
         memory = ReplayMemory(game.reset(), game.getActionSpace(), prioritized=True)
         if pretainedModel is None:
             buildMemory(game, memory, 2**12)
-        train(game, agent, memory, episodes=50000, render=render)
+        train(game, agent, memory, episodes=50000, renderAttention=renderAttention)
     if testAndObserve:
-        agent = Agent(agentName, game.getActionSpace(), modelLoad=pretainedModel)
-        testAgent(game, agent, 100, render=True)
+        game = Atari( games[option]+"Deterministic-v4", render=True)
+        agent = Agent(agentName, game.getActionSpace(), modelLoad=pretainedModel, attentionView=renderAttention)
+        testAgent(game, agent, 100, renderAttention=renderAttention)
 
 
 if __name__ == "__main__":

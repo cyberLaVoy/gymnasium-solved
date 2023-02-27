@@ -3,9 +3,13 @@ import gymnasium as gym
 import numpy as np
 
 class Atari:
-    def __init__(self, game, seed=69):
+    def __init__(self, game, seed=69, render=False):
         self.game = game
-        self.env = gym.make(self.game)
+        if render:
+            render_mode = "human"
+        else:
+            render_mode = None
+        self.env = gym.make(self.game, render_mode=render_mode)
         self.lives = None
         self.framesAfterDeath = None
         self.episode = None
@@ -83,7 +87,5 @@ class Atari:
         return self.env.action_space.n
     def getActionMeanings(self):
         return self.env.unwrapped.get_action_meanings()
-    def render(self):
-        self.env.render()
     def close(self):
         self.env.close()
